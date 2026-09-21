@@ -1,146 +1,271 @@
-"""State Diagram Visualizer: Canvas-based process state machine."""
+"""State Diagram Visualizer: responsive Canvas with rounded boxes, shadows, and animation."""
 
 from __future__ import annotations
 
 import tkinter as tk
-from typing import Dict, Optional, Tuple
+import math
+from typing import Dict, Optional, Tuple, List
+
+from gui.animation import Animator
+from gui.theme import STATE_COLORS, TEXT_PRIMARY, TEXT_SECONDARY, BORDER
 
 
-# State positions and colors
-STATE_CONFIG: Dict[str, Tuple[int, int, str, str]] = {
-    "NEW": (80, 60, "#E8F5E9", "#2E7D32"),
-    "READY": (280, 60, "#E3F2FD", "#1565C0"),
-    "RUNNING": (280, 200, "#FFF3E0", "#E65100"),
-    "BLOCKED": (80, 200, "#FCE4EC", "#C62828"),
-    "TERMINATED": (480, 200, "#F3E5F5", "#6A1B9A"),
+# Relative positions (fractions of canvas size)
+STATE_RELPOS: Dict[str, Tuple[float, float]] = {
+    "NEW": (0.10, 0.22),
+    "READY": (0.40, 0.22),
+    "RUNNING": (0.40, 0.68),
+    "BLOCKED": (0.10, 0.68),
+    "TERMINATED": (0.72, 0.68),
 }
 
-BOX_W = 100
-BOX_H = 50
+ARROWS: List[Tuple[str, str, str]] = [
+    ("NEW", "READY", "ADMIT"),
+    ("READY", "RUNNING", "DISPATCH"),
+    ("RUNNING", "READY", "PREEMPT"),
+    ("RUNNING", "BLOCKED", "BLOCK"),
+    ("RUNNING", "TERMINATED", "TERMINATE"),
+    ("BLOCKED", "READY", "WAKE"),
+]
 
 
 class StateVisualizer(tk.Canvas):
-    """Canvas widget that draws the process state diagram.
+    """Canvas widget that draws a responsive process state diagram.
 
-    Highlights the current state of the selected process and shows
-    process name/PID inside or beside the current state box.
+    Features:
+    - Responsive sizing (recalculates on resize)
+    - Rounded boxes with drop shadows
+    - Current-state glow highlight
+    - Arrow labels for transitions
+    - Token animation support
     """
 
     def __init__(self, master: tk.Widget, **kwargs) -> None:
-        kwargs.setdefault("width", 600)
-        kwargs.setdefault("height", 300)
-        kwargs.setdefault("bg", "white")
+        kwargs.setdefault("width", 620)
+        kwargs.setdefault("height", 320)
+        kwargs.setdefault("bg", "#FFFFFF")
         kwargs.setdefault("highlightthickness", 0)
         super().__init__(master, **kwargs)
+
         self._current_state: Optional[str] = None
         self._process_label: str = ""
+        self._animator = Animator(self)
+        self._box_rects: Dict[str, Tuple[int, int, int, int]] = {}
+        self._token_items: List[int] = []
+
+        self.bind("<Configure>", self._on_resize)
+
+    def _on_resize(self, event: tk.Event) -> None:
         self._draw()
 
     def _draw(self) -> None:
-        """Draw the complete state diagram."""
         self.delete("all")
+        self._box_rects.clear()
         self._draw_arrows()
         self._draw_states()
 
-    def _draw_arrows(self) -> None:
-        """Draw all legal transition arrows."""
-        arrows: list[Tuple[str, str, str]] = [
-            ("NEW", "READY", ""),
-            ("READY", "RUNNING", ""),
-            ("RUNNING", "READY", ""),
-            ("RUNNING", "BLOCKED", ""),
-            ("RUNNING", "TERMINATED", ""),
-            ("BLOCKED", "READY", ""),
+    def _get_box_rect(self, state: str) -> Tuple[int, int, int, int]:
+        w = self.winfo_width()
+        h = self.winfo_height()
+        bx, by = STATE_RELPOS[state]
+        box_w = max(90, int(w * 0.15))
+        box_h = max(44, int(h * 0.18))
+        cx = int(bx * w)
+        cy = int(by * h)
+        return (cx - box_w // 2, cy - box_h // 2, cx + box_w // 2, cy + box_h // 2)
+
+    def _get_box_center(self, state: str) -> Tuple[int, int]:
+        x1, y1, x2, y2 = self._get_box_rect(state)
+        return (x1 + x2) // 2, (y1 + y2) // 2
+
+    def _rounded_rect(self, x1: int, y1: int, x2: int, y2: int, r: int, **kwargs) -> int:
+        """Draw a rounded rectangle and return the item group."""
+        points = [
+            x1 + r, y1,
+            x2 - r, y1,
+            x2, y1,
+            x2, y1 + r,
+            x2, y2 - r,
+            x2, y2,
+            x2 - r, y2,
+            x1 + r, y2,
+            x1, y2,
+            x1, y2 - r,
+            x1, y1 + r,
+            x1, y1,
         ]
-        for src, dst, label in arrows:
-            x1, y1, _, _ = STATE_CONFIG[src]
-            x2, y2, _, _ = STATE_CONFIG[dst]
-            sx = x1 + BOX_W // 2
-            sy = y1 + BOX_H // 2
-            ex = x2 + BOX_W // 2
-            ey = y2 + BOX_H // 2
+        return self.create_polygon(points, smooth=True, **kwargs)
 
-            # Offset start/end to box edges
-            sx2, sy2 = self._edge_point(x1, y1, ex, ey)
-            ex2, ey2 = self._edge_point(x2, y2, sx, sy)
+    def _draw_arrows(self) -> None:
+        w = self.winfo_width()
+        if w < 10:
+            return
 
-            # Curved arrows for bidirectional pairs
-            if (src, dst) in [("READY", "RUNNING"), ("RUNNING", "READY")]:
-                if src == "READY":
-                    sx2, sy2 = x1 + BOX_W, y1 + BOX_H // 4
-                    ex2, ey2 = x2, y2 + BOX_H // 4
-                else:
-                    sx2, sy2 = x2, y2 + BOX_H * 3 // 4
-                    ex2, ey2 = x1 + BOX_W, y1 + BOX_H * 3 // 4
+        for src, dst, label in ARROWS:
+            sx, sy = self._get_box_center(src)
+            dx, dy = self._get_box_center(dst)
+
+            # Offset for bidirectional arrows
+            if (src, dst) == ("READY", "RUNNING"):
+                sx2, sy2 = sx, sy - 6
+                dx2, dy2 = dx, dy - 6
+            elif (src, dst) == ("RUNNING", "READY"):
+                sx2, sy2 = sx, sy + 6
+                dx2, dy2 = dx, dy + 6
+            else:
+                sx2, sy2 = sx, sy
+                dx2, dy2 = dx, dy
+
+            # Compute edge points
+            ex1, ey1 = self._edge_point(src, dx2, dy2)
+            ex2, ey2 = self._edge_point(dst, sx2, sy2)
 
             self.create_line(
-                sx2, sy2, ex2, ey2,
+                ex1, ey1, ex2, ey2,
                 arrow=tk.LAST,
-                arrowshape=(10, 12, 5),
-                fill="#555555",
-                width=1.5,
-                smooth=True,
+                arrowshape=(8, 10, 4),
+                fill="#90A4AE",
+                width=1.8,
             )
 
-    def _edge_point(self, bx: int, by: int, tx: int, ty: int) -> Tuple[int, int]:
-        """Compute the point on the edge of a box closest to the target."""
-        cx = bx + BOX_W // 2
-        cy = by + BOX_H // 2
+            # Arrow label
+            mx = (ex1 + ex2) // 2
+            my = (ey1 + ey2) // 2
+            # Offset label perpendicular to arrow
+            adx = ex2 - ex1
+            ady = ey2 - ey1
+            length = math.sqrt(adx * adx + ady * ady)
+            if length > 0:
+                nx = -ady / length * 12
+                ny = adx / length * 12
+            else:
+                nx, ny = 0, -12
+
+            self.create_text(
+                int(mx + nx), int(my + ny),
+                text=label,
+                fill="#78909C",
+                font=("Helvetica", 7),
+            )
+
+    def _edge_point(self, state: str, tx: int, ty: int) -> Tuple[int, int]:
+        x1, y1, x2, y2 = self._get_box_rect(state)
+        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
         dx = tx - cx
         dy = ty - cy
         if dx == 0 and dy == 0:
             return cx, cy
-
-        # Check horizontal / vertical intersection
-        half_w = BOX_W // 2
-        half_h = BOX_H // 2
-
+        hw = (x2 - x1) // 2
+        hh = (y2 - y1) // 2
         if dx == 0:
-            return cx, by + (half_h if dy > 0 else 0)
+            return cx, cy + (hh if dy > 0 else -hh)
         if dy == 0:
-            return bx + (half_w if dx > 0 else 0), cy
-
-        # Diagonal: find which edge it hits first
-        scale_x = half_w / abs(dx)
-        scale_y = half_h / abs(dy)
-        scale = min(scale_x, scale_y)
-        return int(cx + dx * scale), int(cy + dy * scale)
+            return cx + (hw if dx > 0 else -hw), cy
+        sx = hw / abs(dx)
+        sy = hh / abs(dy)
+        s = min(sx, sy)
+        return int(cx + dx * s), int(cy + dy * s)
 
     def _draw_states(self) -> None:
-        """Draw state boxes, highlighting the current state."""
-        for state, (x, y, bg, border) in STATE_CONFIG.items():
+        w = self.winfo_width()
+        if w < 10:
+            return
+
+        for state in STATE_COLORS:
+            bg, border = STATE_COLORS[state]
             is_current = (state == self._current_state)
-            fill = border if is_current else bg
-            outline = border
-            width = 3 if is_current else 1
+            x1, y1, x2, y2 = self._get_box_rect(state)
+            self._box_rects[state] = (x1, y1, x2, y2)
+            r = 10
 
-            self.create_rectangle(
-                x, y, x + BOX_W, y + BOX_H,
-                fill=fill,
-                outline=outline,
-                width=width,
-            )
+            # Shadow
+            self._rounded_rect(x1 + 2, y1 + 2, x2 + 2, y2 + 2, r,
+                               fill="#E0E0E0", outline="")
 
-            text_color = "white" if is_current else "#333333"
+            if is_current:
+                # Glow
+                self._rounded_rect(x1 - 3, y1 - 3, x2 + 3, y2 + 3, r + 3,
+                                   fill="", outline=border, width=3)
+                self._rounded_rect(x1, y1, x2, y2, r,
+                                   fill=border, outline=border, width=2)
+                text_color = "#FFFFFF"
+                state_font = ("Helvetica", 11, "bold")
+            else:
+                self._rounded_rect(x1, y1, x2, y2, r,
+                                   fill=bg, outline=BORDER, width=1)
+                text_color = border
+                state_font = ("Helvetica", 10, "bold")
+
+            # State name
+            cy_offset = -8 if (is_current and self._process_label) else 0
             self.create_text(
-                x + BOX_W // 2,
-                y + BOX_H // 2 - (10 if self._process_label and is_current else 0),
+                (x1 + x2) // 2, (y1 + y2) // 2 + cy_offset,
                 text=state,
                 fill=text_color,
-                font=("Helvetica", 10, "bold" if is_current else "normal"),
+                font=state_font,
             )
 
+            # Process label inside current state
             if is_current and self._process_label:
                 self.create_text(
-                    x + BOX_W // 2,
-                    y + BOX_H // 2 + 10,
+                    (x1 + x2) // 2, (y1 + y2) // 2 + 12,
                     text=self._process_label,
-                    fill="white",
+                    fill="#FFFFFF",
                     font=("Helvetica", 8),
                 )
 
     def set_state(self, state: Optional[str], process_label: str = "") -> None:
-        """Update the highlighted state and process label."""
         self._current_state = state
         self._process_label = process_label
         self._draw()
+
+    def animate_transition(
+        self,
+        from_state: str,
+        to_state: str,
+        process_label: str,
+        on_complete: Optional[callable] = None,
+    ) -> None:
+        """Animate a token moving from one state to another."""
+        self._animator.cancel()
+
+        # Remove old token
+        for item in self._token_items:
+            try:
+                self.delete(item)
+            except tk.TclError:
+                pass
+        self._token_items.clear()
+
+        sx, sy = self._get_box_center(from_state)
+        ex, ey = self._get_box_center(to_state)
+
+        _, token_border = STATE_COLORS.get(to_state, ("#E0E0E0", "#666666"))
+
+        # Create token (oval + text)
+        r = 12
+        oval_id = self.create_oval(sx - r, sy - r, sx + r, sy + r,
+                                   fill=token_border, outline="#FFFFFF", width=2)
+        text_id = self.create_text(sx, sy, text=process_label,
+                                   fill="#FFFFFF", font=("Helvetica", 7, "bold"))
+        self._token_items = [oval_id, text_id]
+
+        def _on_done() -> None:
+            # Remove token after arrival
+            for item in self._token_items:
+                try:
+                    self.delete(item)
+                except tk.TclError:
+                    pass
+            self._token_items.clear()
+            if on_complete:
+                on_complete()
+
+        self._animator.animate_token(
+            self._token_items,
+            start_xy=(sx, sy),
+            end_xy=(ex, ey),
+            duration_ms=350,
+            steps=22,
+            on_complete=_on_done,
+        )

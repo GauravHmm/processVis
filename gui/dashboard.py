@@ -1,152 +1,226 @@
-"""Dashboard: main application window tying all GUI components together."""
+"""Dashboard: main application window with modern styling, animation, and hierarchy."""
 
 from __future__ import annotations
 
 import tkinter as tk
 import tkinter.ttk as ttk
+from typing import Optional
 
 from core.controller import Controller
 from gui.pcb_viewer import PCBViewer
 from gui.process_table import ProcessTable
+from gui.process_tree import ProcessTree
 from gui.state_visualizer import StateVisualizer
+import gui.theme as T
 
 
 class Dashboard(tk.Tk):
-    """Main application window.
+    """Main application window for V1.1.
 
-    Composes the process table, PCB viewer, state visualizer,
-    transition controls, event log, and creation form.
-    All state mutations go through the Controller.
+    Layout:
+      Header bar
+      Left panel:  Create form | Transitions | Process tree
+      Right panel: State diagram | PCB viewer
+      Bottom:      Process table | Reset button
+      Footer:      Event log
     """
 
     def __init__(self) -> None:
         super().__init__()
         self.title("Process Creation and State Transition Visualizer")
-        self.geometry("1100x720")
-        self.minsize(900, 600)
+        self.geometry("1140x780")
+        self.minsize(960, 640)
+        self.configure(bg=T.BG_WINDOW)
+
+        self.style = ttk.Style(self)
+        T.apply_theme(self.style)
 
         self.controller = Controller()
         self.controller.add_listener(self._refresh)
 
-        self._selected_pid: int | None = None
+        self._selected_pid: Optional[int] = None
+        self._pending_animation: Optional[tuple] = None
+        self._refreshing: bool = False
 
         self._build_ui()
         self._refresh()
 
-    # ── UI construction ────────────────────────────────────────────
+    # ── UI Construction ────────────────────────────────────────────
 
     def _build_ui(self) -> None:
-        # Top bar
-        top_bar = tk.Frame(self, bg="#1565C0", height=40)
-        top_bar.pack(fill="x")
-        tk.Label(
-            top_bar, text="Process Creation and State Transition Visualizer",
-            fg="white", bg="#1565C0", font=("Helvetica", 14, "bold"),
-        ).pack(side="left", padx=12, pady=6)
+        self._build_header()
+        main = tk.Frame(self, bg=T.BG_WINDOW)
+        main.pack(fill="both", expand=True, padx=T.PAD_LG, pady=(T.PAD_MD, 0))
 
-        # Main content area
-        main = tk.Frame(self)
-        main.pack(fill="both", expand=True, padx=8, pady=8)
+        left = tk.Frame(main, bg=T.BG_WINDOW)
+        left.pack(side="left", fill="both", expand=True, padx=(0, T.PAD_MD))
 
-        left = tk.Frame(main)
-        left.pack(side="left", fill="both", expand=True)
+        right = tk.Frame(main, bg=T.BG_WINDOW)
+        right.pack(side="right", fill="both", expand=True, padx=(T.PAD_MD, 0))
 
-        right = tk.Frame(main)
-        right.pack(side="right", fill="both", expand=True, padx=(8, 0))
-
-        # ── Left column ────────────────────────────────────────
         self._build_creation_form(left)
         self._build_transition_controls(left)
-        self._build_process_table(left)
+        self._build_process_tree(left)
 
-        # ── Right column ───────────────────────────────────────
         self._build_state_visualizer(right)
         self._build_pcb_viewer(right)
-        self._build_event_log(right)
 
-        # Reset button at the bottom
-        bottom = tk.Frame(self)
-        bottom.pack(fill="x", padx=8, pady=(0, 8))
-        tk.Button(
-            bottom, text="RESET SIMULATION", command=self._on_reset,
-            bg="#C62828", fg="white", font=("Helvetica", 10, "bold"),
-            relief="flat", padx=16, pady=4,
-        ).pack(side="right")
+        self._build_bottom_bar()
+        self._build_event_log()
+
+    def _build_header(self) -> None:
+        header = tk.Frame(self, bg=T.BG_HEADER, height=52)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+        tk.Label(
+            header, text="Process Creation and State Transition Visualizer",
+            bg=T.BG_HEADER, fg=T.TEXT_LIGHT, font=T.FONT_HEADER,
+        ).pack(side="left", padx=T.PAD_XL, pady=T.PAD_MD)
+        tk.Label(
+            header, text="Operating Systems — Educational Simulation",
+            bg=T.BG_HEADER, fg="#78909C", font=T.FONT_SMALL,
+        ).pack(side="left", padx=(0, T.PAD_XL), pady=T.PAD_MD)
 
     def _build_creation_form(self, parent: tk.Widget) -> None:
-        frame = tk.LabelFrame(parent, text="Create Process", padx=8, pady=6)
-        frame.pack(fill="x", pady=(0, 8))
+        card = tk.Frame(parent, bg=T.BG_CARD, relief="solid", bd=1)
+        card.pack(fill="x", pady=(0, T.PAD_MD))
 
-        row = tk.Frame(frame)
-        row.pack(fill="x")
+        tk.Label(
+            card, text="Create Process", font=T.FONT_SECTION,
+            bg=T.BG_CARD, fg=T.TEXT_PRIMARY,
+        ).pack(anchor="w", padx=T.PAD_LG, pady=(T.PAD_MD, T.PAD_SM))
 
-        tk.Label(row, text="Name:").pack(side="left")
-        self._entry_name = tk.Entry(row, width=14)
-        self._entry_name.pack(side="left", padx=(4, 12))
+        row1 = tk.Frame(card, bg=T.BG_CARD)
+        row1.pack(fill="x", padx=T.PAD_LG, pady=(0, T.PAD_SM))
+        tk.Label(row1, text="Name:", bg=T.BG_CARD, font=T.FONT_SMALL, fg=T.TEXT_SECONDARY).pack(side="left")
+        self._entry_name = tk.Entry(row1, width=12, font=T.FONT_BODY)
+        self._entry_name.pack(side="left", padx=(T.PAD_SM, T.PAD_LG))
         self._entry_name.insert(0, "P1")
 
-        tk.Label(row, text="Priority:").pack(side="left")
-        self._entry_priority = tk.Entry(row, width=6)
-        self._entry_priority.pack(side="left", padx=(4, 12))
+        tk.Label(row1, text="Priority:", bg=T.BG_CARD, font=T.FONT_SMALL, fg=T.TEXT_SECONDARY).pack(side="left")
+        self._entry_priority = tk.Entry(row1, width=5, font=T.FONT_BODY)
+        self._entry_priority.pack(side="left", padx=(T.PAD_SM, T.PAD_LG))
         self._entry_priority.insert(0, "0")
 
-        tk.Button(row, text="CREATE", command=self._on_create,
-                  bg="#2E7D32", fg="white", relief="flat", padx=10).pack(side="left")
+        row2 = tk.Frame(card, bg=T.BG_CARD)
+        row2.pack(fill="x", padx=T.PAD_LG, pady=(0, T.PAD_MD))
+        tk.Label(row2, text="Parent:", bg=T.BG_CARD, font=T.FONT_SMALL, fg=T.TEXT_SECONDARY).pack(side="left")
+        self._parent_var = tk.StringVar(value="None (root)")
+        self._parent_combo = ttk.Combobox(
+            row2, textvariable=self._parent_var,
+            values=["None (root)"], state="readonly", width=14, font=T.FONT_BODY,
+        )
+        self._parent_combo.pack(side="left", padx=(T.PAD_SM, T.PAD_LG))
+
+        ttk.Button(
+            row2, text="+ Create", style="Green.TButton",
+            command=self._on_create,
+        ).pack(side="left", padx=T.PAD_SM)
 
     def _build_transition_controls(self, parent: tk.Widget) -> None:
-        frame = tk.LabelFrame(parent, text="State Transitions", padx=8, pady=6)
-        frame.pack(fill="x", pady=(0, 8))
+        card = tk.Frame(parent, bg=T.BG_CARD, relief="solid", bd=1)
+        card.pack(fill="x", pady=(0, T.PAD_MD))
 
-        self._buttons: dict[str, tk.Button] = {}
+        tk.Label(
+            card, text="State Transitions", font=T.FONT_SECTION,
+            bg=T.BG_CARD, fg=T.TEXT_PRIMARY,
+        ).pack(anchor="w", padx=T.PAD_LG, pady=(T.PAD_MD, T.PAD_SM))
+
+        grid = tk.Frame(card, bg=T.BG_CARD)
+        grid.pack(fill="x", padx=T.PAD_LG, pady=(0, T.PAD_MD))
+
+        self._buttons: dict[str, ttk.Button] = {}
         actions = [
-            ("ADMIT", "#1565C0"),
-            ("DISPATCH", "#E65100"),
-            ("PREEMPT", "#F57F17"),
-            ("BLOCK", "#C62828"),
-            ("WAKE", "#00838F"),
-            ("TERMINATE", "#6A1B9A"),
+            ("ADMIT", "Accent.TButton"),
+            ("DISPATCH", "Orange.TButton"),
+            ("PREEMPT", "Orange.TButton"),
+            ("BLOCK", "Red.TButton"),
+            ("WAKE", "Teal.TButton"),
+            ("TERMINATE", "Purple.TButton"),
         ]
-        row = tk.Frame(frame)
-        row.pack(fill="x")
-        for action, color in actions:
-            btn = tk.Button(
-                row, text=action, command=lambda a=action: self._on_transition(a),
-                bg=color, fg="white", relief="flat", padx=8, pady=2,
-                font=("Helvetica", 9),
+        for i, (action, style_name) in enumerate(actions):
+            btn = ttk.Button(
+                grid, text=action, style=style_name,
+                command=lambda a=action: self._on_transition(a),
             )
-            btn.pack(side="left", padx=2)
+            btn.grid(row=i // 3, column=i % 3, padx=T.PAD_XS, pady=T.PAD_XS, sticky="ew")
             self._buttons[action] = btn
 
-    def _build_process_table(self, parent: tk.Widget) -> None:
-        self._process_table = ProcessTable(parent, on_select=self._on_select_process)
-        self._process_table.pack(fill="both", expand=True, pady=(0, 4))
+        for c in range(3):
+            grid.columnconfigure(c, weight=1)
+
+    def _build_process_tree(self, parent: tk.Widget) -> None:
+        card = tk.Frame(parent, bg=T.BG_CARD, relief="solid", bd=1)
+        card.pack(fill="both", expand=True)
+        self._process_tree = ProcessTree(card, on_select=self._on_select_process)
+        self._process_tree.pack(fill="both", expand=True, padx=T.PAD_SM, pady=T.PAD_SM)
 
     def _build_state_visualizer(self, parent: tk.Widget) -> None:
-        frame = tk.LabelFrame(parent, text="State Diagram", padx=4, pady=4)
-        frame.pack(fill="x", pady=(0, 8))
-        self._state_viz = StateVisualizer(frame)
-        self._state_viz.pack(fill="x")
+        card = tk.Frame(parent, bg=T.BG_CARD, relief="solid", bd=1)
+        card.pack(fill="x", pady=(0, T.PAD_MD))
+
+        tk.Label(
+            card, text="State Diagram", font=T.FONT_SECTION,
+            bg=T.BG_CARD, fg=T.TEXT_PRIMARY,
+        ).pack(anchor="w", padx=T.PAD_LG, pady=(T.PAD_MD, T.PAD_SM))
+
+        self._state_viz = StateVisualizer(card)
+        self._state_viz.pack(fill="x", padx=T.PAD_SM, pady=(0, T.PAD_SM), ipady=4)
 
     def _build_pcb_viewer(self, parent: tk.Widget) -> None:
-        frame = tk.LabelFrame(parent, text="PCB Details", padx=8, pady=6)
-        frame.pack(fill="x", pady=(0, 8))
-        self._pcb_viewer = PCBViewer(frame)
-        self._pcb_viewer.pack(fill="x")
+        card = tk.Frame(parent, bg=T.BG_CARD, relief="solid", bd=1)
+        card.pack(fill="both", expand=True)
+        self._pcb_viewer = PCBViewer(card)
+        self._pcb_viewer.pack(fill="both", expand=True, padx=T.PAD_SM, pady=T.PAD_SM)
 
-    def _build_event_log(self, parent: tk.Widget) -> None:
-        frame = tk.LabelFrame(parent, text="Event Log", padx=4, pady=4)
-        frame.pack(fill="both", expand=True)
+    def _build_bottom_bar(self) -> None:
+        bar = tk.Frame(self, bg=T.BG_WINDOW)
+        bar.pack(fill="x", padx=T.PAD_LG, pady=(T.PAD_MD, 0))
+
+        self._process_table = ProcessTable(bar, on_select=self._on_select_process)
+        self._process_table.pack(side="left", fill="both", expand=True, padx=(0, T.PAD_MD))
+
+        right_side = tk.Frame(bar, bg=T.BG_WINDOW)
+        right_side.pack(side="right", fill="y")
+
+        ttk.Button(
+            right_side, text="Reset Simulation", style="Danger.TButton",
+            command=self._on_reset,
+        ).pack(anchor="ne")
+
+    def _build_event_log(self) -> None:
+        footer = tk.Frame(self, bg=T.BG_WINDOW)
+        footer.pack(fill="x", padx=T.PAD_LG, pady=(T.PAD_MD, T.PAD_LG))
+
+        card = tk.Frame(footer, bg=T.BG_CARD, relief="solid", bd=1)
+        card.pack(fill="both", expand=True)
+
+        tk.Label(
+            card, text="Event Log", font=T.FONT_SECTION,
+            bg=T.BG_CARD, fg=T.TEXT_PRIMARY,
+        ).pack(anchor="w", padx=T.PAD_LG, pady=(T.PAD_MD, T.PAD_SM))
+
+        log_frame = tk.Frame(card, bg=T.BG_CARD)
+        log_frame.pack(fill="both", expand=True, padx=T.PAD_SM, pady=(0, T.PAD_SM))
 
         self._log_text = tk.Text(
-            frame, height=10, state="disabled",
-            font=("Courier", 9), bg="#FAFAFA", wrap="word",
+            log_frame, height=8, state="disabled",
+            font=T.FONT_MONO_SMALL, bg="#FAFAFA", fg=T.TEXT_PRIMARY,
+            wrap="word", relief="solid", bd=1, padx=T.PAD_SM, pady=T.PAD_SM,
         )
-        scroll = tk.Scrollbar(frame, command=self._log_text.yview)
+        scroll = ttk.Scrollbar(log_frame, command=self._log_text.yview)
         self._log_text.configure(yscrollcommand=scroll.set)
         self._log_text.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
 
-    # ── Event handlers ─────────────────────────────────────────
+        # Log entry color tags
+        self._log_text.tag_configure("created", foreground=T.LOG_CREATED)
+        self._log_text.tag_configure("transition", foreground=T.LOG_TRANSITION)
+        self._log_text.tag_configure("rejected", foreground=T.LOG_REJECTED)
+        self._log_text.tag_configure("reset", foreground=T.LOG_RESET)
+        self._log_text.tag_configure("timestamp", foreground=T.TEXT_MUTED)
+
+    # ── Event Handlers ─────────────────────────────────────────────
 
     def _on_create(self) -> None:
         name = self._entry_name.get().strip()
@@ -156,13 +230,29 @@ class Dashboard(tk.Tk):
             priority = int(self._entry_priority.get().strip())
         except ValueError:
             priority = 0
-        self.controller.create_process(name=name, priority=priority)
-        # Auto-increment name for convenience
+
+        parent_pid = 0
+        parent_str = self._parent_var.get()
+        if parent_str != "None (root)":
+            try:
+                parent_pid = int(parent_str.split()[0][1:])
+            except (IndexError, ValueError):
+                parent_pid = 0
+
+        self.controller.create_process(name=name, priority=priority, parent_pid=parent_pid)
         self._auto_increment_name()
+        self._refresh()
 
     def _on_transition(self, action: str) -> None:
         if self._selected_pid is None:
             return
+
+        process = self.controller.get_process(self._selected_pid)
+        if process is None:
+            return
+
+        from_state = process.state
+
         action_map = {
             "ADMIT": self.controller.admit,
             "DISPATCH": self.controller.dispatch,
@@ -173,9 +263,15 @@ class Dashboard(tk.Tk):
         }
         fn = action_map.get(action)
         if fn:
-            fn(self._selected_pid)
+            success, _ = fn(self._selected_pid)
+            if success:
+                to_state = process.state
+                label = f"P{process.pid}"
+                self._state_viz.animate_transition(from_state, to_state, label)
 
     def _on_select_process(self, pid: int) -> None:
+        if self._refreshing:
+            return
         self._selected_pid = pid
         self._refresh()
 
@@ -184,20 +280,48 @@ class Dashboard(tk.Tk):
         self._selected_pid = None
         self._entry_name.delete(0, "end")
         self._entry_name.insert(0, "P1")
+        self._state_viz._animator.cancel()
         self._refresh()
 
-    # ── Refresh ────────────────────────────────────────────────
+    # ── Refresh ────────────────────────────────────────────────────
 
     def _refresh(self) -> None:
-        """Update all GUI elements from the controller state."""
+        self._refreshing = True
+        try:
+            self._do_refresh()
+        finally:
+            self._refreshing = False
+
+    def _do_refresh(self) -> None:
         processes = self.controller.get_all_processes()
+        tree = self.controller.get_process_tree()
+
+        # Process table
         self._process_table.update_table(processes, self._selected_pid)
 
-        # PCB viewer
+        # Process tree
+        self._process_tree.update_tree(processes, tree, self._selected_pid)
+
+        # Parent combobox
+        current_parent = self._parent_var.get()
+        parent_values = ["None (root)"]
+        for p in processes:
+            parent_values.append(f"P{p.pid} ({p.name})")
+        self._parent_combo["values"] = parent_values
+        if current_parent not in parent_values:
+            self._parent_var.set("None (root)")
+
+        # Selected process
         selected_process = None
+        children_pids = []
         if self._selected_pid is not None:
             selected_process = self.controller.get_process(self._selected_pid)
-        self._pcb_viewer.display(selected_process)
+            if selected_process:
+                children = self.controller.get_children(self._selected_pid)
+                children_pids = [c.pid for c in children]
+
+        # PCB viewer
+        self._pcb_viewer.display(selected_process, children_pids)
 
         # State visualizer
         if selected_process:
@@ -207,29 +331,42 @@ class Dashboard(tk.Tk):
             self._state_viz.set_state(None, "")
 
         # Transition buttons
-        if selected_process:
+        if selected_process and selected_process.state != "TERMINATED":
             valid_actions = set(self.controller.get_valid_actions(selected_process.pid))
             for action, btn in self._buttons.items():
-                btn.config(state="normal" if action in valid_actions else "disabled")
+                btn.configure(state="normal" if action in valid_actions else "disabled")
         else:
             for btn in self._buttons.values():
-                btn.config(state="disabled")
+                btn.configure(state="disabled")
 
         # Event log
         self._refresh_log()
 
     def _refresh_log(self) -> None:
-        """Update the event log text widget."""
         events = self.controller.event_logger.get_events()
         self._log_text.config(state="normal")
         self._log_text.delete("1.0", "end")
         for event in events:
-            self._log_text.insert("end", event + "\n")
+            if "CREATED" in event and "REJECTED" not in event:
+                tag = "created"
+            elif "REJECTED" in event:
+                tag = "rejected"
+            elif "->" in event:
+                tag = "transition"
+            elif "RESET" in event:
+                tag = "reset"
+            else:
+                tag = None
+
+            if tag:
+                self._log_text.insert("end", event + "\n", tag)
+            else:
+                self._log_text.insert("end", event + "\n")
+
         self._log_text.see("end")
         self._log_text.config(state="disabled")
 
     def _auto_increment_name(self) -> None:
-        """Try to auto-increment the process name (e.g. P1 -> P2)."""
         name = self._entry_name.get().strip()
         if name and name[-1].isdigit():
             prefix = name.rstrip("0123456789")

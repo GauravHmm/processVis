@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from core.event_logger import EventLogger
 from process.process import Process
@@ -23,10 +23,34 @@ class Controller:
         self.event_logger = EventLogger()
         self._listeners: List[Callable[[], None]] = []
 
-    def create_process(self, name: str, priority: int = 0) -> Process:
-        """Create a new process in NEW state."""
-        process = self.process_manager.create_process(name=name, priority=priority)
-        self.event_logger.log(f"P{process.pid} ({process.name}) CREATED")
+    def create_process(
+        self,
+        name: str,
+        priority: int = 0,
+        parent_pid: int = 0,
+    ) -> Process:
+        """Create a new process in NEW state.
+
+        Args:
+            name: Process name.
+            priority: Process priority.
+            parent_pid: PID of parent (0 for root process).
+
+        Returns:
+            The newly created Process.
+
+        Raises:
+            ValueError: If parent is invalid (nonexistent or self).
+        """
+        process = self.process_manager.create_process(
+            name=name, priority=priority, parent_pid=parent_pid,
+        )
+        if parent_pid != 0:
+            self.event_logger.log(
+                f"P{process.pid} ({process.name}) CREATED (parent: P{parent_pid})"
+            )
+        else:
+            self.event_logger.log(f"P{process.pid} ({process.name}) CREATED")
         self._notify()
         return process
 
@@ -58,16 +82,28 @@ class Controller:
         """Retrieve a process by PID."""
         return self.process_manager.get_process(pid)
 
-    def get_all_processes(self) -> list[Process]:
+    def get_all_processes(self) -> List[Process]:
         """Return all processes."""
         return self.process_manager.get_all_processes()
 
-    def get_valid_actions(self, pid: int) -> list[str]:
+    def get_valid_actions(self, pid: int) -> List[str]:
         """Return valid actions for a process."""
         process = self.process_manager.get_process(pid)
         if process is None:
             return []
         return self.state_manager.get_valid_actions(process)
+
+    def get_parent(self, pid: int) -> Optional[Process]:
+        """Return the parent process, or None if root."""
+        return self.process_manager.get_parent(pid)
+
+    def get_children(self, pid: int) -> List[Process]:
+        """Return the list of child processes."""
+        return self.process_manager.get_children(pid)
+
+    def get_process_tree(self) -> Dict[int, List[int]]:
+        """Return the parent-to-children PID mapping."""
+        return self.process_manager.get_process_tree()
 
     def reset(self) -> None:
         """Clear all processes, events, and reset PID generation."""
