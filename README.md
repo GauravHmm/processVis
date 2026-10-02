@@ -1,6 +1,6 @@
 # Process Creation and State Transition Visualizer
 
-A Tkinter-based educational simulation of operating-system process management. Demonstrates process creation, PCB representation, the classic 5-state process lifecycle, and parent-child process hierarchy.
+A web-based educational simulation of operating-system process management. Demonstrates process creation, PCB representation, the classic 5-state process lifecycle, and parent-child process hierarchy.
 
 > **Note:** This is a *simulation* for academic purposes. It does **not** manipulate real OS processes.
 
@@ -21,12 +21,12 @@ A Tkinter-based educational simulation of operating-system process management. D
 - **Parent-child hierarchy** with process tree visualization
 - **PCB viewer** showing all simulated fields including children
 - **Process table** with row selection and alternating row colors
-- **State diagram visualizer** (responsive Canvas) with rounded boxes, shadows, transition labels, and animated tokens
+- **State diagram visualizer** with highlighted current state and transition arrows
 - **Transition controls** (ADMIT, DISPATCH, PREEMPT, BLOCK, WAKE, TERMINATE) enabled/disabled based on valid transitions
-- **Event log** with color-coded entries (created/transitions/rejected/reset)
+- **Event log** with timestamped entries (created/transitions/rejected/reset)
 - **Reset** clears all processes, hierarchy, events, and PID counter
-- **Modern GUI** with consistent design system, card layout, and ttk theming
-- **92 automated tests** covering all backend logic and hierarchy
+- **Modern web UI** with dark theme, card layout, and responsive design
+- **129 automated tests** covering all backend logic, hierarchy, and API
 
 ## State Transition Table
 
@@ -45,7 +45,7 @@ All other transitions are rejected and logged.
 
 - A process may have zero or one parent
 - A process may have zero or more children
-- Root processes have no parent (parent PID = 0)
+- Root processes have no parent (parent PID = null)
 - A process cannot be its own parent
 - Terminating a parent does NOT terminate its children
 - Children remain visible in the hierarchy after parent termination
@@ -54,115 +54,161 @@ All other transitions are rejected and logged.
 ## Architecture
 
 ```
-GUI (Tkinter)
-    |
-Controller
-    |
-ProcessManager / StateManager
-    |
+Next.js Frontend (React + TypeScript + Tailwind)
+        ↓ HTTP/JSON
+FastAPI Backend (Python)
+        ↓
+Controller / ProcessManager / StateManager / EventLogger
+        ↓
 Process / PCB
-    |
-EventLogger
 ```
 
-The GUI never directly modifies process state. All mutations flow through the Controller.
+The frontend never directly modifies process state. All mutations flow through the FastAPI backend.
 
 ## Project Structure
 
 ```
 process-creation-visualizer/
-├── main.py                    # Entry point
-├── requirements.txt
-├── process/
+├── api/
 │   ├── __init__.py
-│   ├── pcb.py                 # PCB dataclass
-│   ├── process.py             # Process wrapper
-│   ├── process_manager.py     # Process table, PID generation, hierarchy
-│   └── state_manager.py       # State transition logic
+│   ├── main.py                 # FastAPI app entry point
+│   ├── routes.py               # REST API routes
+│   └── schemas.py              # Pydantic request/response models
 ├── core/
 │   ├── __init__.py
-│   ├── controller.py          # Orchestrates all backend operations
-│   └── event_logger.py        # Timestamped event logging
-├── gui/
+│   ├── controller.py           # Orchestrates all backend operations
+│   └── event_logger.py         # Timestamped event logging
+├── process/
 │   ├── __init__.py
-│   ├── theme.py               # Design system (colors, fonts, ttk styles)
-│   ├── animation.py           # after()-based token animation
-│   ├── dashboard.py           # Main application window
-│   ├── process_table.py       # Styled Treeview process table
-│   ├── process_tree.py        # Hierarchical Treeview for parent-child
-│   ├── state_visualizer.py    # Responsive Canvas state diagram
-│   └── pcb_viewer.py          # Grouped PCB details panel
-└── tests/
-    ├── __init__.py
-    ├── test_process.py        # PCB and Process tests
-    ├── test_process_manager.py # ProcessManager tests
-    ├── test_state_manager.py  # State transition tests
-    ├── test_controller.py     # Controller and EventLogger tests
-    └── test_hierarchy.py      # Parent-child hierarchy tests
+│   ├── pcb.py                  # PCB dataclass
+│   ├── process.py              # Process wrapper
+│   ├── process_manager.py      # Process table, PID generation, hierarchy
+│   └── state_manager.py        # State transition logic
+├── frontend/
+│   ├── app/                    # Next.js App Router pages
+│   ├── components/             # React components
+│   ├── lib/                    # API client
+│   ├── types/                  # TypeScript types
+│   └── package.json
+├── gui/                        # Legacy Tkinter GUI (retained for reference)
+├── tests/
+│   ├── __init__.py
+│   ├── test_api.py             # API integration tests
+│   ├── test_process.py         # PCB and Process tests
+│   ├── test_process_manager.py # ProcessManager tests
+│   ├── test_state_manager.py   # State transition tests
+│   ├── test_controller.py      # Controller and EventLogger tests
+│   └── test_hierarchy.py       # Parent-child hierarchy tests
+├── requirements.txt
+└── README.md
 ```
 
 ## Installation
+
+### Backend (Python + FastAPI)
 
 ```bash
 # Create virtual environment
 python3 -m venv venv
 source venv/bin/activate
 
-# Install dependencies (tkinter is part of the Python standard library)
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-**System requirement:** `python3-tk` must be installed for the GUI:
+### Frontend (Next.js + React + TypeScript + Tailwind)
 
 ```bash
-# Debian/Ubuntu
-sudo apt-get install python3-tk
-
-# macOS (usually included)
-brew install python-tk
-
-# Windows (usually included with Python installer)
+cd frontend
+pnpm install
 ```
 
 ## Running the Application
 
+### Start Backend
+
 ```bash
-python main.py
+source venv/bin/activate
+uvicorn api.main:app --reload --host 127.0.0.1 --port 8000
 ```
+
+- API: http://127.0.0.1:8000
+- Swagger docs: http://127.0.0.1:8000/docs
+
+### Start Frontend
+
+```bash
+cd frontend
+pnpm dev
+```
+
+- Frontend: http://localhost:3000
 
 ## Running Tests
 
+### Backend Tests
+
 ```bash
+source venv/bin/activate
 python -m pytest tests/ -v
 ```
 
-All 92 tests should pass.
+All 129 tests should pass.
 
-## V1.1 Changes
+### Frontend Type Checking & Build
 
-### GUI Modernization
-- Consistent design system with unified color palette and typography
-- Card/panel layout with visual hierarchy
-- ttk theming using `clam` theme for cross-platform consistency
-- Responsive state diagram that scales with window size
-- Rounded boxes with drop shadows in the state diagram
-- Animated token movement on state transitions (via `after()`)
-- Color-coded event log entries
-- Styled process table with alternating row colors
-- Grouped PCB viewer sections (Identity, CPU, Memory)
+```bash
+cd frontend
+pnpm exec tsc --noEmit
+pnpm build
+```
 
-### Process Hierarchy
-- Parent-child relationships between processes
-- Process tree view using native ttk.Treeview hierarchy
-- Parent selection dropdown when creating processes
-- Children displayed in PCB viewer
-- Hierarchy preserved after parent termination
-- Self-parent and invalid parent validation
+## API Endpoints
 
-### Hierarchy Semantics
-- Terminating a parent does NOT terminate children (intentional simulation simplification)
-- Children remain alive and visible after parent termination
-- Reset clears all processes and hierarchy data
+### Process Management
+- `GET /api/processes` - List all processes
+- `POST /api/processes` - Create process (name, priority?, parent_pid?)
+- `GET /api/processes/{pid}` - Get process by PID
+- `GET /api/processes/{pid}/valid-actions` - Get valid actions for process
+
+### State Transitions
+- `POST /api/processes/{pid}/admit` - NEW → READY
+- `POST /api/processes/{pid}/dispatch` - READY → RUNNING
+- `POST /api/processes/{pid}/preempt` - RUNNING → READY
+- `POST /api/processes/{pid}/block` - RUNNING → BLOCKED
+- `POST /api/processes/{pid}/wake` - BLOCKED → READY
+- `POST /api/processes/{pid}/terminate` - RUNNING → TERMINATED
+
+### Hierarchy
+- `GET /api/processes/{pid}/parent` - Get parent process
+- `GET /api/processes/{pid}/children` - Get child processes
+- `GET /api/process-tree` - Get full hierarchy tree
+
+### Events & Reset
+- `GET /api/events` - Get event log
+- `POST /api/reset` - Reset simulation
+
+### Health
+- `GET /api/health` - Health check
+
+## Technology Stack
+
+**Backend:**
+- Python 3.12+
+- FastAPI 0.109+
+- Uvicorn
+- Pydantic 2
+
+**Frontend:**
+- Next.js 16 (App Router)
+- React 19
+- TypeScript 5
+- Tailwind CSS 3
+- pnpm
+
+**Testing:**
+- pytest (backend)
+- TypeScript type checking (frontend)
 
 ## Limitations
 
@@ -174,3 +220,8 @@ All 92 tests should pass.
 - Single-process execution model (one process can be RUNNING at a time conceptually)
 - PCB fields (registers, memory, program counter) are simulated/randomized educational values
 - Parent termination does not cascade to children (by design)
+- No authentication, database, WebSockets, or external dependencies
+
+## License
+
+Educational academic project.

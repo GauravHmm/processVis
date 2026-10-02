@@ -1,6 +1,11 @@
 "use client";
 
-export function Header() {
+interface HeaderProps {
+  onReset: () => void;
+  isResetting: boolean;
+}
+
+export function Header({ onReset, isResetting }: HeaderProps) {
   return (
     <header className="bg-zinc-950 border-b border-zinc-800 sticky top-0 z-40">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -41,11 +46,12 @@ export function Header() {
             </div>
             <button
               type="button"
+              onClick={onReset}
+              disabled={isResetting}
               className="px-3 py-1.5 text-sm font-medium text-zinc-300 bg-zinc-900 border border-zinc-700 rounded-md hover:bg-zinc-800 hover:border-zinc-600 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 focus:ring-offset-zinc-950 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled
-              aria-label="Reset simulation (not implemented)"
+              aria-label={isResetting ? "Resetting simulation…" : "Reset simulation"}
             >
-              Reset
+              {isResetting ? "Resetting…" : "Reset"}
             </button>
           </div>
         </div>
