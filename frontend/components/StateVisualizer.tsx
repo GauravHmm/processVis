@@ -1,18 +1,7 @@
 "use client";
 
 import { PCBResponse } from "@/types/api";
-
-const STATE_CONFIG = {
-  NEW: { label: "NEW", color: "bg-emerald-500", border: "border-emerald-500", bg: "bg-emerald-500/20", text: "text-emerald-400" },
-  READY: { label: "READY", color: "bg-blue-500", border: "border-blue-500", bg: "bg-blue-500/20", text: "text-blue-400" },
-  RUNNING: { label: "RUNNING", color: "bg-amber-500", border: "border-amber-500", bg: "bg-amber-500/20", text: "text-amber-400" },
-  BLOCKED: { label: "BLOCKED", color: "bg-rose-500", border: "border-rose-500", bg: "bg-rose-500/20", text: "text-rose-400" },
-  TERMINATED: { label: "TERMINATED", color: "bg-violet-500", border: "border-violet-500", bg: "bg-violet-500/20", text: "text-violet-400" },
-} as const;
-
-type StateKey = keyof typeof STATE_CONFIG;
-
-const STATE_ORDER: StateKey[] = ["NEW", "READY", "RUNNING", "BLOCKED", "TERMINATED"];
+import { getProcessStateConfig, STATE_ORDER } from "@/lib/processState";
 
 interface StateVisualizerProps {
   processes: PCBResponse[];
@@ -21,14 +10,14 @@ interface StateVisualizerProps {
 
 export function StateVisualizer({ processes, selectedPid }: StateVisualizerProps) {
   const selectedProcess = processes.find((p) => p.pid === selectedPid);
-  const currentState = selectedProcess?.state as StateKey | undefined;
+  const currentState = selectedProcess?.state as "NEW" | "READY" | "RUNNING" | "BLOCKED" | "TERMINATED" | undefined;
 
   if (!selectedPid || !selectedProcess) {
     return (
       <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
-        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-lg bg-zinc-800/50">
+        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-lg bg-base-200">
           <svg
-            className="h-8 w-8 text-zinc-500"
+            className="h-8 w-8 text-base-content/40"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -42,8 +31,8 @@ export function StateVisualizer({ processes, selectedPid }: StateVisualizerProps
             />
           </svg>
         </div>
-        <p className="mt-4 text-zinc-400">Select a process to view its state</p>
-        <p className="mt-1 text-xs text-zinc-500">Click a process in the table or hierarchy</p>
+        <p className="mt-4 text-base-content/60">Select a process to view its state</p>
+        <p className="mt-1 text-xs text-base-content/40">Click a process in the table or hierarchy</p>
       </div>
     );
   }
@@ -52,7 +41,7 @@ export function StateVisualizer({ processes, selectedPid }: StateVisualizerProps
     <div className="flex flex-col items-center gap-6">
       <div className="flex flex-col items-center gap-4 w-full">
         {STATE_ORDER.map((state) => {
-          const config = STATE_CONFIG[state];
+          const config = getProcessStateConfig(state);
           const isCurrent = state === currentState;
           const isReachable = isCurrent || (
             (currentState === "NEW" && state === "READY") ||
@@ -66,22 +55,22 @@ export function StateVisualizer({ processes, selectedPid }: StateVisualizerProps
               <div
                 className={`flex items-center justify-center w-36 h-14 rounded-lg border-2 font-semibold text-sm transition-all ${
                   isCurrent
-                    ? `${config.bg} ${config.border} ${config.text} shadow-lg shadow-${config.color.replace("bg-", "")}/30 ring-2 ring-${config.color.replace("bg-", "")}/50`
-                    : `${config.bg} ${config.border} ${config.text} opacity-60`
+                    ? `bg-${config.statusColor}-500/20 border-${config.statusColor}-500 text-${config.statusColor}-400 shadow-lg shadow-${config.statusColor}-500/30 ring-2 ring-${config.statusColor}-500/50`
+                    : `bg-base-200 border-base-300 text-base-content/50 opacity-60`
                 }`}
                 role="status"
                 aria-current={isCurrent ? "true" : undefined}
               >
                 {config.label}
                 {isCurrent && (
-                  <span className="ml-2 inline-flex items-center justify-center w-5 h-5 rounded-full bg-white/20 text-xs">
+                  <span className="ml-2 inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary/20 text-xs">
                     ●
                   </span>
                 )}
               </div>
               {state !== "TERMINATED" && (
                 <div className="flex items-center justify-center w-1 h-6">
-                  <div className={`w-0.5 h-full ${isCurrent || isReachable ? config.color : "bg-zinc-700"}`} />
+                  <div className={`w-0.5 h-full ${isCurrent || isReachable ? `bg-${getProcessStateConfig(currentState || "NEW").statusColor}-500` : "bg-base-300"}`} />
                 </div>
               )}
             </div>
@@ -89,28 +78,32 @@ export function StateVisualizer({ processes, selectedPid }: StateVisualizerProps
         })}
       </div>
 
-      <div className="rounded-lg bg-zinc-800/50 p-4 border border-zinc-700 w-full max-w-xs">
-        <h4 className="text-sm font-medium text-zinc-300 mb-3">Process Info</h4>
-        <dl className="space-y-2 text-sm">
-          <div className="flex justify-between">
-            <dt className="text-zinc-500">PID</dt>
-            <dd className="font-mono text-zinc-100">P{selectedProcess.pid}</dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="text-zinc-500">Name</dt>
-            <dd className="text-zinc-100 truncate max-w-[140px]">{selectedProcess.name}</dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="text-zinc-500">Current State</dt>
-            <dd className={`font-medium ${STATE_CONFIG[currentState as StateKey]?.text ?? "text-zinc-100"}`}>
-              {selectedProcess.state}
-            </dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="text-zinc-500">Priority</dt>
-            <dd className="font-mono text-zinc-400">{selectedProcess.priority}</dd>
-          </div>
-        </dl>
+      <div className="card bg-base-100 border border-base-300 w-full max-w-xs">
+        <div className="card-body">
+          <h4 className="card-title text-sm font-medium text-base-content/80 mb-3">Process Info</h4>
+          <dl className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <dt className="text-base-content/60">PID</dt>
+              <dd className="font-mono text-base-content">P{selectedProcess.pid}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-base-content/60">Name</dt>
+              <dd className="text-base-content truncate max-w-[140px]">{selectedProcess.name}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-base-content/60">Current State</dt>
+              <dd className={`font-medium ${getProcessStateConfig(selectedProcess.state).text}`}>
+                <span className={`badge ${getProcessStateConfig(selectedProcess.state).badge}`}>
+                  {selectedProcess.state}
+                </span>
+              </dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-base-content/60">Priority</dt>
+              <dd className="font-mono text-base-content/60">{selectedProcess.priority}</dd>
+            </div>
+          </dl>
+        </div>
       </div>
     </div>
   );

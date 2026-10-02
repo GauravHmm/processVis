@@ -57,16 +57,18 @@ export function ProcessCreationForm({ processes, onCreated }: ProcessCreationFor
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {error && (
-        <div className="rounded-md bg-rose-500/10 border border-rose-500/30 p-3 text-sm text-rose-300" role="alert">
-          {error}
+        <div className="alert alert-error" role="alert">
+          <svg className="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m-2 2l2 2m-2 2l2 2m-2 2l2 2m-2 2l2 2m-2 2l2 2m-2 2l2 2m-2 2l2 2m-2 2l2 2m-2 2l2 2m-2 2l2 2m-2 2l2 2m-2 2l2 2" /></svg>
+          <span>{error}</span>
         </div>
       )}
 
-      <div className="rounded-lg bg-zinc-800/50 p-4 border border-zinc-700">
+      <fieldset className="fieldset">
+        <legend className="fieldset-legend">Process Details</legend>
         <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <label htmlFor="process-name" className="block text-xs text-zinc-500 mb-1">
-              Process Name
+          <div className="form-control">
+            <label htmlFor="process-name" className="label">
+              <span className="label-text">Process Name</span>
             </label>
             <input
               id="process-name"
@@ -74,16 +76,14 @@ export function ProcessCreationForm({ processes, onCreated }: ProcessCreationFor
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="P1"
-              className={`w-full px-3 py-2 text-sm bg-zinc-900 border rounded-md text-zinc-100 placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-amber-500 focus:border-amber-500 transition-colors ${
-                name && !isValidName ? "border-rose-500" : "border-zinc-700"
-              }`}
+              className={`input input-bordered ${name && !isValidName ? "border-error" : ""}`}
               disabled={isSubmitting}
               autoComplete="off"
             />
           </div>
-          <div>
-            <label htmlFor="process-priority" className="block text-xs text-zinc-500 mb-1">
-              Priority
+          <div className="form-control">
+            <label htmlFor="process-priority" className="label">
+              <span className="label-text">Priority</span>
             </label>
             <input
               id="process-priority"
@@ -92,21 +92,19 @@ export function ProcessCreationForm({ processes, onCreated }: ProcessCreationFor
               onChange={(e) => setPriority(e.target.value)}
               placeholder="0"
               min="0"
-              className={`w-full px-3 py-2 text-sm bg-zinc-900 border rounded-md text-zinc-100 placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-amber-500 focus:border-amber-500 transition-colors ${
-                priority && !isValidPriority ? "border-rose-500" : "border-zinc-700"
-              }`}
+              className={`input input-bordered ${priority && !isValidPriority ? "border-error" : ""}`}
               disabled={isSubmitting}
             />
           </div>
-          <div className="sm:col-span-2">
-            <label htmlFor="process-parent" className="block text-xs text-zinc-500 mb-1">
-              Parent Process (optional)
+          <div className="form-control sm:col-span-2">
+            <label htmlFor="process-parent" className="label">
+              <span className="label-text">Parent Process (optional)</span>
             </label>
             <select
               id="process-parent"
               value={parentPid ?? ""}
               onChange={(e) => setParentPid(e.target.value ? parseInt(e.target.value, 10) : null)}
-              className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-md text-zinc-100 focus:outline-none focus:ring-1 focus:ring-amber-500 focus:border-amber-500"
+              className="select select-bordered"
               disabled={isSubmitting}
             >
               {parentOptions.map((opt) => (
@@ -115,19 +113,26 @@ export function ProcessCreationForm({ processes, onCreated }: ProcessCreationFor
                 </option>
               ))}
             </select>
-            <p className="mt-1 text-xs text-zinc-500">
+            <p className="text-xs text-base-content/60">
               Processes cannot be their own parent. Backend will reject invalid hierarchies.
             </p>
           </div>
         </div>
-      </div>
+      </fieldset>
 
       <button
         type="submit"
-        className="w-full px-4 py-2.5 text-sm font-medium text-zinc-900 bg-amber-500 rounded-md hover:bg-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 focus:ring-offset-zinc-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        className="btn btn-primary w-full"
         disabled={isSubmitting || !isValidName || !isValidPriority}
       >
-        {isSubmitting ? "Creating…" : "Create Process"}
+        {isSubmitting ? (
+          <>
+            <span className="loading loading-spinner loading-sm mr-2" />
+            Creating…
+          </>
+        ) : (
+          "Create Process"
+        )}
       </button>
     </form>
   );

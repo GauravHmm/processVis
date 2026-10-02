@@ -25,7 +25,7 @@ A web-based educational simulation of operating-system process management. Demon
 - **Transition controls** (ADMIT, DISPATCH, PREEMPT, BLOCK, WAKE, TERMINATE) enabled/disabled based on valid transitions
 - **Event log** with timestamped entries (created/transitions/rejected/reset)
 - **Reset** clears all processes, hierarchy, events, and PID counter
-- **Modern web UI** with dark theme, card layout, and responsive design
+- **Modern workbench-style web UI** with a light process-lab theme and responsive design
 - **129 automated tests** covering all backend logic, hierarchy, and API
 
 ## State Transition Table
@@ -203,7 +203,7 @@ pnpm build
 - Next.js 16 (App Router)
 - React 19
 - TypeScript 5
-- Tailwind CSS 3
+- Tailwind CSS 4
 - pnpm
 
 **Testing:**

@@ -1,3 +1,79 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@plugin "daisyui";
+
+@plugin "daisyui/theme" {
+  name: "process-lab";
+  default: true;
+  prefersdark: false;
+  color-scheme: light;
+
+  --color-base-100: oklch(98% 0.005 240);
+  --color-base-200: oklch(95% 0.005 240);
+  --color-base-300: oklch(90% 0.01 240);
+  --color-base-content: oklch(25% 0.01 240);
+
+  --color-primary: oklch(60% 0.18 85);
+  --color-primary-content: oklch(98% 0.005 240);
+
+  --color-secondary: oklch(50% 0.08 240);
+  --color-secondary-content: oklch(98% 0.005 240);
+
+  --color-accent: oklch(55% 0.22 200);
+  --color-accent-content: oklch(98% 0.005 240);
+
+  --color-neutral: oklch(25% 0.01 240);
+  --color-neutral-content: oklch(70% 0.01 240);
+
+  --color-info: oklch(55% 0.2 250);
+  --color-info-content: oklch(98% 0.005 240);
+
+  --color-success: oklch(55% 0.18 145);
+  --color-success-content: oklch(98% 0.005 240);
+
+  --color-warning: oklch(70% 0.18 80);
+  --color-warning-content: oklch(98% 0.005 240);
+
+  --color-error: oklch(55% 0.22 25);
+  --color-error-content: oklch(98% 0.005 240);
+
+  --radius-field: 0.375rem;
+  --radius-box: 0.5rem;
+
+  --animation-btn: 0.15s;
+  --animation-input: 0.15s;
+
+  --btn-focus-scale: 0.98;
+  --border-btn: 1px;
+  --tab-border: 1px;
+  --tab-radius: 0.375rem;
+}
+
+/* Shared workbench type scale. Keep secondary text readable on the light theme. */
+.ui-app-title { font-size: 1.25rem; line-height: 1.35; font-weight: 650; color: var(--color-base-content); }
+.ui-panel-title { font-size: 1rem; line-height: 1.4; font-weight: 650; color: var(--color-base-content); }
+.ui-section-label { font-size: 0.8125rem; line-height: 1.35; font-weight: 650; color: oklch(35% 0.02 240); }
+.ui-body { font-size: 0.875rem; line-height: 1.45; color: var(--color-base-content); }
+.ui-label { font-size: 0.8125rem; line-height: 1.4; color: oklch(40% 0.02 240); }
+.ui-value { font-size: 0.875rem; line-height: 1.4; font-weight: 550; color: var(--color-base-content); }
+.ui-meta { font-size: 0.8125rem; line-height: 1.4; color: oklch(40% 0.02 240); }
+.ui-table-header { font-size: 0.75rem; line-height: 1.35; font-weight: 650; color: oklch(35% 0.02 240); }
+
+@keyframes state-edge-active {
+  0%, 100% { filter: drop-shadow(0 0 0 transparent); }
+  50% { filter: drop-shadow(0 0 5px color-mix(in srgb, var(--color-primary) 70%, transparent)); }
+}
+
+@keyframes node-target-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.96); transform-origin: center; }
+  50% { opacity: 0.95; transform: scale(1.04); transform-origin: center; }
+}
+
+.state-edge-active { animation: state-edge-active 900ms ease-in-out infinite; }
+.node-target-pulse { animation: node-target-pulse 900ms ease-in-out infinite; transform-box: fill-box; }
+
+button:focus-visible,
+[role="tab"]:focus-visible,
+[role="treeitem"]:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
