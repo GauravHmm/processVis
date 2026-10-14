@@ -936,7 +936,7 @@ Detailed inventories, verified outputs, and caveats are in [TESTING.md](TESTING.
 | `error while attempting to bind on address … already in use` | Port 8000/3000 occupied | Stop the other process or change the port (and `NEXT_PUBLIC_API_URL`) |
 | `pnpm lint` fails with "Invalid project directory … /lint" | Next.js 16 removed `next lint` | Use `pnpm exec tsc --noEmit` |
 | Warning "Next.js ignored pnpm-lock.yaml in /home/lenovowsl …" | A stray `pnpm-lock.yaml` outside the repository (workspace home) | Harmless; remove it or set `turbopack.root` in `next.config.js` |
-| `StarletteDeprecationWarning: Using httpx with starlette.testclient is deprecated` | Installed starlette/httpx generation skew | Informational; see TESTING.md for impact on tests |
+| `StarletteDeprecationWarning: Using httpx with starlette.testclient is deprecated` | Installed starlette/httpx generation skew | Informational; see [TESTING.md](TESTING.md) for impact on tests |
 | `python main.py` raises `TclError: no display name` | Headless environment | Run on a machine with a display (`DISPLAY` set) |
 | `ModuleNotFoundError: No module named 'api'` | Wrong working directory | Run commands from the repository root |
 | Stale/odd simulation state | State is in-memory | `POST /api/reset` or restart the backend |
@@ -954,7 +954,7 @@ root):
 |---|---:|---|
 | `test_process.py` | 11 | PCB creation and defaults, priority/parent fields, registers, memory values, `to_dict()`; `Process` construction, properties, state setter, `repr` |
 | `test_process_manager.py` | 9 | Creation, PID uniqueness/sequence, lookup (present/absent), list-all, removal, clear, no PID recycling |
-| `test_state_manager.py` | 22 | All six valid transitions; eight invalid transitions; TERMINATED has no outgoing transitions; `get_valid_actions` per state; `can_transition`; unknown action label |
+| `test_state_manager.py` | 22 | All six valid transitions; seven invalid-transition tests; TERMINATED has no outgoing transitions; `get_valid_actions` per state; `can_transition`; unknown action label |
 | `test_controller.py` | 22 | `EventLogger` (log/list/clear/listeners) and `Controller` (create, six actions, rejection, terminated lock-out, event content, reset, listener notification, full lifecycle) |
 | `test_hierarchy.py` | 28 | `ProcessManager` hierarchy rules (root/child/nested, parents, children, tree, termination survival, self-parent, nonexistent parent, removal semantics, reset) and the same through `Controller` |
 | `test_scheduling.py` | 10 | FCFS with idle gap and metrics, FCFS input-order tie, SJF selection + tie, Priority order + convention, Round Robin slicing with mid-slice arrival, RR idle start, four invalid-input cases |
@@ -968,7 +968,7 @@ runner), visual rendering, CORS behaviour, and the `pnpm build` output (verified
 1. **API test hang (previously reported)** — a hang in `tests/test_api.py` was reported
    earlier in the project. It is **not reproducible in the current environment**: on
    13 Oct 2026 `python -m pytest tests/test_api.py -v` completed 45 tests in ~0.5 s and the
-   full suite completed 147 tests in 0.55–0.60 s across repeated runs (see TESTING.md). If
+   full suite completed 147 tests in 0.55–0.60 s across repeated runs (see [TESTING.md](TESTING.md)). If
    it recurs, run the module alone under a shell timeout
    (`timeout 120 python -m pytest tests/test_api.py -v`) to confirm, then check the
    starlette/httpx versions — the suite currently emits
