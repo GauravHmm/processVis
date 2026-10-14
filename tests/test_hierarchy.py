@@ -1,7 +1,6 @@
 """Tests for process hierarchy: parent-child relationships."""
 
 import pytest
-from process.process import Process
 from process.process_manager import ProcessManager
 from core.controller import Controller
 

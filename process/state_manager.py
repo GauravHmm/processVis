@@ -51,6 +51,33 @@ class StateManager:
         return actions
 
     @staticmethod
+    def rejection_reason(process: Process, action: str) -> str:
+        """Explain why an action cannot be applied in the process's current state.
+
+        Args:
+            process: The process the action was requested for.
+            action: The action name (for example ``DISPATCH``).
+
+        Returns:
+            A human-readable reason naming the required state, the process's
+            current state, and the actions that are valid right now.
+        """
+        label = action.upper()
+        target = _action_to_target(label)
+        if target is None:
+            return f"Unknown action {action!r}"
+
+        required = next(
+            (src for (src, dst), name in ACTION_LABELS.items() if name == label),
+            target,
+        )
+        valid = ", ".join(StateManager.get_valid_actions(process)) or "none"
+        return (
+            f"{label} requires state {required}, but P{process.pid} is "
+            f"{process.state}; valid actions now: {valid}"
+        )
+
+    @staticmethod
     def transition(process: Process, action: str) -> Tuple[bool, Optional[str], Optional[str]]:
         """Attempt a state transition.
 

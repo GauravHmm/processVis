@@ -8,17 +8,17 @@ The application is a SIMULATION of OS process management.
 It must NOT manipulate real operating-system processes.
 
 Technology:
-- Python 3
-- Tkinter
+- Python 3, FastAPI, pytest (backend)
+- Tkinter desktop interface (standard library)
+- Next.js, React, TypeScript, Tailwind CSS (web interface)
 - Python standard library wherever possible
-- pytest for tests
 
-## V1.0 Scope
+## Required Features
 
-V1.0 MUST contain:
+The following must keep working:
 
 1. Process creation
-2. Unique PID generation
+2. Unique PID generation (never recycled until reset)
 3. PCB representation
 4. Process table
 5. Process states:
@@ -28,13 +28,17 @@ V1.0 MUST contain:
    - BLOCKED
    - TERMINATED
 6. Valid state transitions
-7. Invalid transition rejection
+7. Invalid transition rejection with a reason
 8. Process selection
 9. PCB viewer
 10. State transition visualization
 11. Event/transition log
 12. Reset simulation
-13. Automated tests for core logic
+13. Parent-child process hierarchy
+14. CPU scheduling: FCFS, non-preemptive SJF, non-preemptive Priority, Round Robin
+15. Scheduling metrics (waiting, turnaround, response) and Gantt timeline
+16. Algorithm comparison on identical job inputs
+17. Automated tests for core logic
 
 ## State Machine
 
@@ -73,14 +77,15 @@ RUNNING -> TERMINATED:
 Process exits.
 
 Do not allow arbitrary state changes.
+Rejected transitions must report why the action is invalid for the current state.
 
 ## Architecture
 
 Use separation of concerns:
 
-GUI
+GUI / Web UI
     ↓
-Controller
+Controller (or REST API → Controller)
     ↓
 Process Manager / State Manager
     ↓
@@ -97,6 +102,10 @@ process.state = RUNNING
 inside GUI code.
 
 Instead use controller/state-manager methods.
+
+CPU scheduling lives in `scheduling/engine.py` as a pure function of its
+request payload. It must stay separate from the interactive simulator: running
+a schedule must never mutate a simulated process's state.
 
 ## PCB
 
@@ -130,7 +139,7 @@ Example:
 
 PID generation must guarantee uniqueness during a simulation.
 
-Do not recycle terminated PIDs in V1.0.
+Do not recycle terminated PIDs; PIDs restart only on reset.
 
 ## Event Logger
 
@@ -138,7 +147,7 @@ Log:
 
 - process creation
 - successful transitions
-- rejected transitions
+- rejected transitions (with the rejection reason)
 - termination
 - reset
 
@@ -153,7 +162,7 @@ Example:
 
 ## GUI
 
-The GUI should contain:
+The interfaces should contain:
 
 1. Application title
 2. Process creation form
@@ -163,6 +172,7 @@ The GUI should contain:
 6. State transition controls
 7. Event log
 8. Reset button
+9. CPU scheduling workspace (job inputs, algorithm selection, results)
 
 The currently selected process should be visually clear.
 
@@ -180,15 +190,14 @@ Prioritize:
 - simple professional appearance
 
 Do NOT introduce:
-- React
-- web frameworks
 - databases
 - authentication
-- networking
+- networking beyond localhost
 - unnecessary dependencies
 - multiprocessing
 - threading
-- real OS process manipulation
+- real process manipulation
+- coupling between the scheduler and the process simulator
 
 ## Code Quality
 
@@ -216,22 +225,23 @@ Tests must cover:
 - invalid transitions
 - termination
 - event logging
+- hierarchy rules
+- scheduling algorithms and metrics
+- API behaviour
 
-Do not consider V1.0 complete until tests pass.
+Do not consider the project complete until tests pass.
 
-## Development Rule
+Before finishing a change, run:
 
-Before adding optional features, make the complete V1.0 work.
+```bash
+python -m pytest tests/ -q      # backend
+cd frontend && pnpm lint        # tsc --noEmit with unused-code checks
+cd frontend && pnpm build       # production build
+```
 
-Do NOT implement:
+## Scope Rule
 
-- process tree
-- scheduling algorithms
-- CPU utilization
-- IPC
-- synchronization
-- virtual memory
-- real process monitoring
-- animations
-
-unless explicitly requested after V1.0 is complete.
+Keep the complete feature set above working. Optional additions (IPC,
+synchronization, virtual memory, real process monitoring, persistence,
+scheduling feedback into the simulator) are out of scope unless explicitly
+requested.

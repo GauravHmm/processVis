@@ -7,7 +7,7 @@ import math
 from typing import Dict, Optional, Tuple, List
 
 from gui.animation import Animator
-from gui.theme import STATE_COLORS, TEXT_PRIMARY, TEXT_SECONDARY, BORDER
+from gui.theme import STATE_COLORS, BORDER
 
 
 # Relative positions (fractions of canvas size)

@@ -121,7 +121,12 @@ class Controller:
         self._listeners.remove(callback)
 
     def _do_transition(self, pid: int, action: str) -> Tuple[bool, str]:
-        """Perform a state transition and log the result."""
+        """Perform a state transition and log the result.
+
+        Returns:
+            ``(success, detail)`` — ``detail`` is the target state on success
+            and the rejection reason on failure.
+        """
         process = self.process_manager.get_process(pid)
         if process is None:
             return False, f"Process P{pid} not found"
@@ -132,13 +137,16 @@ class Controller:
             self.event_logger.log(
                 f"P{process.pid} ({process.name}) {from_state} -> {to_state}"
             )
+            detail = action
         else:
+            reason = self.state_manager.rejection_reason(process, action)
             self.event_logger.log(
-                f"P{process.pid} ({process.name}) REJECTED: {process.state} -> {action}"
+                f"P{process.pid} ({process.name}) REJECTED: {reason}"
             )
+            detail = reason
 
         self._notify()
-        return success, action
+        return success, detail
 
     def _notify(self) -> None:
         """Notify all registered listeners."""

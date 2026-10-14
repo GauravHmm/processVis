@@ -16,7 +16,7 @@ project, their verified results, and known issues. Architecture and API details 
 | Configuration files | **None** — no `pytest.ini`, `pyproject.toml`, or `conftest.py`; pytest discovers `tests/` from the repository root |
 | Test package | `tests/__init__.py` (empty) makes the suite an importable package |
 | Isolation | `tests/test_api.py` uses an `autouse` fixture calling `api.routes.reset_controller()` before and after every test, so the API singleton starts empty per test |
-| Frontend | No test runner; verification is `tsc --noEmit` + `next build` |
+| Frontend | No test runner; verification is `pnpm lint` (`tsc --noEmit` + unused-code checks) + `pnpm build` |
 
 Run everything from the repository root with the virtual environment active:
 
@@ -47,14 +47,17 @@ python -m pytest tests/ -v
   animation) — verified manually (see §4.5).
 - React/TypeScript components and `lib/` helpers — no frontend test framework exists.
 - CORS behaviour, `/openapi.json` shape, and HTTP behaviour under concurrency.
-- `pnpm lint` (currently non-functional, see §5.2).
+- Frontend behaviour (health badge polling, rejection-message rendering, error
+  normalisation) — verified by `pnpm lint` (type checking) and by hand, not by automated
+  component tests.
 
 ---
 
 ## 3. Commands executed and verified results
 
-All commands were run on the working tree on **13 Oct 2026** (Python 3.12.3, pytest 8.4.2,
-Node 24.18.0, pnpm 12.4.2).
+All commands were run on the working tree on **14 Oct 2026** (Python 3.12.3, pytest 8.4.2,
+Node 24.18.0, pnpm 12.4.2), after the cleanup/documentation pass described in
+[TECHNICAL_DOCUMENTATION.md §8.2](TECHNICAL_DOCUMENTATION.md).
 
 ### 3.1 Backend — full suite
 
@@ -66,44 +69,49 @@ venv/bin/python -m pytest tests/ -v
 =============================== warnings summary ========================
 .../fastapi/testclient.py:1 StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
 .../starlette/testclient.py:53 DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
-======================= 147 passed, 2 warnings in 0.60s ========================
+======================= 147 passed, 2 warnings in 1.93s ========================
 ```
 
-Re-run in quiet mode: `147 passed, 2 warnings in 0.55s`. No failures, no skips, no errors.
-`.pytest_cache/v/cache/lastfailed` is empty (`{}`).
+No failures, no skips, no errors. The two warnings originate from the installed
+starlette/httpx/anyio stack (see §5.1).
 
 ### 3.2 Backend — per-file runs
 
 | Command | Result |
 |---|---|
-| `venv/bin/python -m pytest tests/test_api.py -q` | `45 passed, 2 warnings in 0.46s` |
-| `venv/bin/python -m pytest tests/test_controller.py -q` | `22 passed in 0.01s` |
-| `venv/bin/python -m pytest tests/test_hierarchy.py -q` | `28 passed in 0.02s` |
-| `venv/bin/python -m pytest tests/test_process.py -q` | `11 passed in 0.01s` |
-| `venv/bin/python -m pytest tests/test_process_manager.py -q` | `9 passed in 0.01s` |
-| `venv/bin/python -m pytest tests/test_scheduling.py -q` | `10 passed in 0.01s` |
-| `venv/bin/python -m pytest tests/test_state_manager.py -q` | `22 passed in 0.02s` |
-| `venv/bin/python -m pytest` (no arguments, root discovery) | `147 passed, 2 warnings in 0.55s` |
-| `venv/bin/python -m pytest tests/ --collect-only -q` | `147 tests collected in 0.31s` |
+| `venv/bin/python -m pytest tests/test_api.py -q` | `45 passed, 2 warnings in 1.50s` |
+| `venv/bin/python -m pytest tests/test_controller.py -q` | `22 passed in 0.05s` |
+| `venv/bin/python -m pytest tests/test_hierarchy.py -q` | `28 passed in 0.03s` |
+| `venv/bin/python -m pytest tests/test_process.py -q` | `11 passed in 0.03s` |
+| `venv/bin/python -m pytest tests/test_process_manager.py -q` | `9 passed in 0.03s` |
+| `venv/bin/python -m pytest tests/test_scheduling.py -q` | `10 passed in 0.05s` |
+| `venv/bin/python -m pytest tests/test_state_manager.py -q` | `22 passed in 0.05s` |
+| `venv/bin/python -m pytest tests/ --collect-only -q` | `147 tests collected in 0.78s` |
 
-Each file also ran standalone with a 60 s shell timeout and completed in well under a
-second — in particular `tests/test_api.py`, the module historically reported as hanging
+Each file ran standalone under a 60 s shell timeout and completed in well under two
+seconds — in particular `tests/test_api.py`, the module historically reported as hanging
 (see §5.1).
 
-### 3.3 Frontend — type check, build, dev server
+### 3.3 Backend — compilation and imports
+
+```bash
+venv/bin/python -m compileall -q api core process gui scheduling tests main.py   # exit 0
+venv/bin/python -c "import api.main, core.controller, scheduling.engine"          # imports OK
+```
+
+### 3.4 Frontend — type check, lint, build
 
 | Command | Result |
 |---|---|
+| `cd frontend && pnpm lint` (`tsc --noEmit` + `noUnusedLocals`/`noUnusedParameters`) | exit code **0**, no diagnostics |
 | `cd frontend && pnpm exec tsc --noEmit` | exit code **0**, no diagnostics |
-| `cd frontend && pnpm build` | exit code **0**: Next.js 16.3.5 (Turbopack), `✓ Compiled successfully`, `Running TypeScript … Finished`, `Generating static pages … (3/3)`, routes `/` and `/_not-found` |
-| `cd frontend && pnpm dev` then `GET http://localhost:3000/` | server ready in 242 ms, HTTP **200** |
-| `cd frontend && pnpm lint` | **fails**, exit code 1 (see §5.2) |
+| `cd frontend && pnpm build` | exit code **0**: Next.js 16.3.5 (Turbopack), `✓ Compiled successfully`, `Running TypeScript … Finished`, `Generating static pages … (3/3)`, routes `/` and `/_not-found`; emitted CSS is byte-identical to the pre-cleanup build |
 
-Build/dev output also prints an informational warning: *Next.js ignored pnpm-lock.yaml in
-/home/lenovowsl because it is outside the current Git repository* (a stray lockfile in the
-workspace home directory, unrelated to `frontend/pnpm-lock.yaml`).
+`pnpm lint` is the type gate (it is `tsc --noEmit` with unused-locals/parameters checks —
+see [TECHNICAL_DOCUMENTATION.md §6.5](TECHNICAL_DOCUMENTATION.md)). It passes with exit
+code 0; there is no separate ESLint configuration in this project.
 
-### 3.4 Backend — live API smoke test
+### 3.5 Backend — live API smoke test
 
 Started `venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000` and exercised the API
 with `curl`:
@@ -111,26 +119,30 @@ with `curl`:
 | Request | Verified response |
 |---|---|
 | `GET /api/health` | `200 {"status":"ok"}` |
-| `GET /` | `200 {"name":"…API","version":"1.0.0","docs":"/docs","redoc":"/redoc"}` |
+| `POST /api/reset` | `200 {"success":true,"message":"Simulation reset"}` |
 | `POST /api/processes` `{"name":"Shell","priority":5}` | `201` full `PCBResponse`, `parent_pid: null`, `children: []` |
-| `POST /api/processes` `{"name":"Worker","parent_pid":1}` | `201`, `parent_pid: 1` |
-| `GET /api/processes` | both processes; parent shows `"children":[2]` |
-| `GET /api/processes/1/valid-actions` | `{"pid":1,"actions":["ADMIT"]}` |
-| `POST /api/processes/1/admit` | `{"success":true,"action":"ADMIT","from_state":"NEW","to_state":"READY"}` |
-| `POST /api/processes/2/dispatch` (from NEW) | `200 {"success":false,…,"message":"DISPATCH"}` + `REJECTED` event |
-| `GET /api/processes/999` | `404 {"detail":"Process P999 not found"}` |
-| `POST /api/processes` with `parent_pid: 3` (self) | `400 {"detail":"A process cannot be its own parent"}` |
-| `POST /api/processes` with `{"name":""}` | `422` with list-shaped `detail` |
-| `GET /api/process-tree` | `{"tree":{"1":[2],"2":[]}}` |
-| `GET /api/events` | four timestamped entries (2× CREATED, 1× `NEW -> READY`, 1× `REJECTED`) |
-| `POST /api/scheduling/run` (FCFS) | full metrics/timeline, averages `1.5 / 5.0 / 1.5` |
-| `POST /api/scheduling/run` (ROUND_ROBIN, quantum 2) | timeline `a 0–2, b 2–4, a 4–6, a 6–7` |
-| `POST /api/scheduling/run` (RR without quantum) | `422` |
-| `POST /api/scheduling/compare` | `200` |
-| `OPTIONS` preflight from `http://localhost:3000` | `200`, `access-control-allow-origin: http://localhost:3000` |
-| `OPTIONS` preflight from `http://evil.example` | `400 Disallowed CORS origin` |
+| `POST /api/processes` `{"name":"S","parent_pid":1}` | `201`, `parent_pid: 1` |
+| `POST /api/processes/1/dispatch` (process in NEW) | `200 {"success":false,…,"message":"DISPATCH requires state READY, but P1 is NEW; valid actions now: ADMIT"}` |
+| `POST /api/processes` with `{"name":""}` | `422` list-shaped `detail` (`string_too_short`, `loc:["body","name"]`) |
+| `POST /api/processes` with `{"name":"x","priority":200}` | `422` list-shaped `detail` (`less_than_equal`, `loc:["body","priority"]`) |
+| `GET /api/events` | includes `P1 (Shell) REJECTED: DISPATCH requires state READY, but P1 is NEW; valid actions now: ADMIT` |
+| `POST /api/scheduling/run` (Round Robin, quantum 2) | full metrics/timeline, `priority_convention` string present |
+| `POST /api/scheduling/run` (Round Robin without quantum) | `422` list-shaped `detail` (`value_error`, `loc:["body"]`) |
+| `POST /api/scheduling/compare` | `200` with all four algorithms |
+| `GET /openapi.json` (`POST /api/processes` responses) | codes `201/400/422`; `422` now references `HTTPValidationError` (list-shaped `detail`), `400` references `ErrorResponse` (string `detail`) |
+| `OPTIONS` preflight from `http://localhost:3000` | `200` |
+| `OPTIONS` preflight from `http://evil.example` | `400` |
 
-The server was shut down after the smoke test; no application code was modified.
+The server was shut down after the smoke test.
+
+### 3.6 Evidence for the dead-code and config findings
+
+| Finding | Method | Result |
+|---|---|---|
+| `frontend/tailwind.config.ts` is unused | removed the file, rebuilt, compared the emitted CSS hash to the pre-change build | CSS **byte-identical** → file removed |
+| `autoprefixer` in `postcss.config.mjs` is required | temporarily removed it, rebuilt, compared CSS | CSS **changed** → dependency kept |
+| `PCBViewer`, `Panel`, `StateMachine`, `StateVisualizer` unused | searched all `.ts`/`.tsx` imports | no references → files removed |
+| `api.getProcess`/`getParent`/`getChildren` unused | searched all `.ts`/`.tsx` call sites | no calls → helpers removed (`healthCheck` now used by `Header`) |
 
 ---
 
@@ -160,8 +172,8 @@ python -m pytest tests/ -x -q
 
 ```bash
 cd frontend
-pnpm exec tsc --noEmit      # types only
-pnpm build                  # types + production bundle
+pnpm lint             # tsc --noEmit with noUnusedLocals/noUnusedParameters (exit 0)
+pnpm build            # types + production bundle (exit 0)
 ```
 
 ### 4.5 Manual checks that replace missing automation
@@ -188,11 +200,11 @@ works; it has no automated test coverage.
 ### 5.1 API test hang (previously reported) — not reproducible
 
 A hang affecting `tests/test_api.py` was reported earlier in the project. Verification on
-13 Oct 2026 found **no hang**:
+14 Oct 2026 found **no hang**:
 
-- `python -m pytest tests/test_api.py -v` → `45 passed … in 0.46–0.50 s`
-- `python -m pytest tests/ -v` → `147 passed … in 0.55–0.60 s` (repeated runs)
-- `.pytest_cache/v/cache/lastfailed` is empty, i.e. no recorded failures
+- `venv/bin/python -m pytest tests/test_api.py -q` → `45 passed … in 1.50 s`
+- `venv/bin/python -m pytest tests/ -q` → `147 passed … in 1.93 s` (repeated runs)
+- The reported hang does not reproduce on this checkout; triage below kept for reference.
 
 Relevant risk factors if it reappears (all observed, none currently causing failures):
 
@@ -217,17 +229,12 @@ confirm (`timeout 120 python -m pytest tests/test_api.py -v`), then compare inst
 `starlette`/`httpx`/`anyio` versions against `requirements.txt`. No project source change is
 required to reproduce the current passing behaviour.
 
-### 5.2 `pnpm lint` is non-functional
+### 5.2 `pnpm lint` — now functional
 
-```
-$ pnpm lint
-$ next lint
-Invalid project directory provided, no such directory: .../frontend/lint
-[ELIFECYCLE] Command failed with exit code 1.
-```
-
-Next.js 16 removed the `next lint` subcommand, so the script in `frontend/package.json`
-fails. Use `pnpm exec tsc --noEmit` (verified passing) for the type gate.
+`pnpm lint` in `frontend/package.json` now runs `tsc --noEmit` with `noUnusedLocals` and
+`noUnusedParameters` enabled, replacing the removed `next lint` subcommand. It passes with
+exit code 0 and no diagnostics. See [TECHNICAL_DOCUMENTATION.md §6.5](TECHNICAL_DOCUMENTATION.md)
+for full detail.
 
 ### 5.3 Warnings in the passing suite
 
@@ -243,12 +250,17 @@ They do not affect results but make `-W error::DeprecationWarning` unusable (§5
 ### 5.4 Behavioural assertions worth knowing when writing tests
 
 - Rejected transitions are **HTTP 200** with `success: false` (only unknown PIDs are 404).
+  The `message` now includes a human-readable reason and the currently valid actions, e.g.
+  `DISPATCH requires state READY, but P1 is NEW; valid actions now: ADMIT`. Tests should
+  assert that `message` is a non-empty string; do not pin the full sentence.
 - `get_valid_actions` for `RUNNING` has unspecified ordering — compare with `set(...)`.
 - `GET /api/process-tree` keys arrive as **strings** in JSON.
 - API tests must account for the shared singleton: use the provided `reset_state` fixture
   (already `autouse` in `test_api.py`) or call `api.routes.reset_controller()`.
 - Scheduling tests should assert timeline segments as `(job_id, start, end)` tuples; the
   engine is deterministic, so exact equality is safe.
+- Validation errors on `POST /api/processes` are `422` with a **list-shaped** `detail`
+  (FastAPI's `HTTPValidationError`), not the string `detail` used for `400` errors.
 
 ---
 
@@ -260,11 +272,12 @@ They do not affect results but make `-W error::DeprecationWarning` unusable (§5
 | HTTP surface | `tests/test_api.py` | Module-level `client = TestClient(app)`; rely on the autouse `reset_state` fixture; assert status code *and* body fields |
 | Frontend | — | Not established; would require adding a runner (e.g. Vitest) to `frontend/package.json` |
 
-After adding tests, re-run the full suite and keep the counts in
+After adding tests, re-run the full suite and the frontend checks, then keep the counts in
 [README.md](../README.md), this file, and
 [TECHNICAL_DOCUMENTATION.md](TECHNICAL_DOCUMENTATION.md) in sync:
 
 ```bash
 source venv/bin/activate
 python -m pytest tests/ -v
+cd frontend && pnpm lint && pnpm build
 ```

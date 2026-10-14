@@ -9,13 +9,12 @@ import type {
   ProcessCreateRequest,
   TransitionResponse,
   ValidActionsResponse,
-  ParentResponse,
-  ChildrenResponse,
   ProcessTreeResponse,
   EventsResponse,
   ResetResponse,
   HealthCheckResponse,
   ApiErrorResponse,
+  ApiValidationIssue,
   SchedulingRequest,
   SchedulingComparisonRequest,
   SchedulingResult,
@@ -38,14 +37,59 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Turn an API `detail` payload into one readable line.
+ *
+ * FastAPI returns a plain string for `HTTPException` errors and a list of
+ * validation issues for HTTP 422 request-body errors, so both shapes are
+ * handled here instead of at every call site.
+ */
+function formatDetail(detail: ApiErrorResponse["detail"]): string | null {
+  if (typeof detail === "string") {
+    return detail.length > 0 ? detail : null;
+  }
+
+  if (Array.isArray(detail)) {
+    const messages = detail.map(formatIssue).filter((message): message is string => Boolean(message));
+    if (messages.length > 0) return messages.join("; ");
+  }
+
+  return null;
+}
+
+function formatIssue(issue: ApiValidationIssue): string {
+  const message = stripValueErrorPrefix(issue.msg || "is invalid");
+  const field = formatField(issue.loc);
+  return field ? `${field}: ${message}` : message;
+}
+
+/** FastAPI prefixes `ValueError` messages with "Value error, ". */
+function stripValueErrorPrefix(message: string): string {
+  return message.startsWith("Value error, ") ? message.slice("Value error, ".length) : message;
+}
+
+/** Turn a FastAPI error location such as `["body", "jobs", 0, "burst_time"]` into `jobs[0].burst_time`. */
+function formatField(loc: ApiValidationIssue["loc"]): string {
+  if (!Array.isArray(loc)) return "";
+  let field = "";
+  for (const segment of loc.slice(1)) {
+    if (typeof segment === "number") {
+      field += `[${segment}]`;
+    } else if (segment !== "") {
+      field += field === "" ? segment : `.${segment}`;
+    }
+  }
+  return field;
+}
+
 async function handleResponse<T>(response: Response, endpoint: string): Promise<T> {
   if (!response.ok) {
-    let detail: string;
+    let detail = response.statusText || `HTTP ${response.status}`;
     try {
       const errorData: ApiErrorResponse = await response.json();
-      detail = errorData.detail ?? response.statusText;
+      detail = formatDetail(errorData.detail) ?? detail;
     } catch {
-      detail = response.statusText;
+      // Non-JSON body (for example an HTML error page) keeps the status text.
     }
     throw new ApiError(response.status, endpoint, detail);
   }
@@ -88,9 +132,6 @@ export const api = {
   // Process listing and creation
   getProcesses: (): Promise<ProcessListResponse> =>
     fetchJson<ProcessListResponse>(`${API_BASE_URL}/api/processes`, {}, "GET /api/processes"),
-
-  getProcess: (pid: number): Promise<PCBResponse> =>
-    fetchJson<PCBResponse>(`${API_BASE_URL}/api/processes/${pid}`, {}, `GET /api/processes/${pid}`),
 
   createProcess: (data: ProcessCreateRequest): Promise<PCBResponse> =>
     fetchJson<PCBResponse>(
@@ -154,20 +195,6 @@ export const api = {
     ),
 
   // Hierarchy
-  getParent: (pid: number): Promise<ParentResponse> =>
-    fetchJson<ParentResponse>(
-      `${API_BASE_URL}/api/processes/${pid}/parent`,
-      {},
-      `GET /api/processes/${pid}/parent`
-    ),
-
-  getChildren: (pid: number): Promise<ChildrenResponse> =>
-    fetchJson<ChildrenResponse>(
-      `${API_BASE_URL}/api/processes/${pid}/children`,
-      {},
-      `GET /api/processes/${pid}/children`
-    ),
-
   getProcessTree: (): Promise<ProcessTreeResponse> =>
     fetchJson<ProcessTreeResponse>(
       `${API_BASE_URL}/api/process-tree`,

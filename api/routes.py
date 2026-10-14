@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from fastapi import APIRouter, HTTPException, status
 
@@ -116,7 +116,6 @@ async def list_processes() -> ProcessListResponse:
     status_code=status.HTTP_201_CREATED,
     responses={
         400: {"model": ErrorResponse, "description": "Invalid parent or self-parent"},
-        422: {"model": ErrorResponse, "description": "Validation error"},
     },
 )
 async def create_process(payload: ProcessCreate) -> PCBResponse:

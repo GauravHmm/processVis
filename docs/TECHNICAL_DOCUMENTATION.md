@@ -7,6 +7,8 @@ field, and behaviour described here exists in the implementation.
 Companion documents:
 
 - [README.md](../README.md) — overview and quick start
+- [USER_GUIDE.md](USER_GUIDE.md) — how to operate the interfaces
+- [PROJECT_EXPLANATION.md](PROJECT_EXPLANATION.md) — beginner-friendly explanation and viva notes
 - [TESTING.md](TESTING.md) — test inventory, verified command results, known issues
 
 ---
@@ -53,7 +55,7 @@ scheduling engine computes over integer *simulation time units*, not real elapse
 | Reset | Clears processes, hierarchy, events, and restarts PID generation at 1 |
 | CPU scheduling | FCFS, non-preemptive SJF, non-preemptive Priority, Round Robin; single run or four-way comparison with Gantt timeline and averages |
 | Interfaces | Next.js web UI over REST; Tkinter desktop UI over the same in-process controller |
-| Quality | 147 pytest tests; TypeScript type checking; production build |
+| Quality | 147 pytest tests; `pnpm lint` (TypeScript type check with unused-code checks); production build |
 
 ### 1.4 Current limitations and future scope
 
@@ -66,11 +68,12 @@ Current limitations (details in [§8](#8-quality-and-limitations)):
 - The simulator does not enforce that only one process is RUNNING at a time.
 - No IPC, synchronization, shared memory, virtual memory, multi-level feedback queues, or
   preemptive scheduling variants (SJF/Priority are non-preemptive by design).
-- No frontend automated tests; the `pnpm lint` script is currently non-functional.
+- No frontend automated tests; `pnpm lint` runs the TypeScript compiler (type errors and
+  unused locals/parameters) rather than ESLint.
 
 Realistic future improvements: a scheduler that drives the interactive simulator's states,
-a documented preemptive SJF/Priority variant, frontend component tests, removal of dead
-components, and a working lint configuration for Next.js 16.
+a documented preemptive SJF/Priority variant, frontend component tests, and ESLint with the
+Next.js plugin if stricter style rules are wanted.
 
 ---
 
@@ -190,7 +193,7 @@ SchedulingResultResponse {algorithm, time_quantum, priority_convention,
 | Pydantic schemas | `api/schemas.py` | Request/response contracts for the API, including scheduling models. |
 | Controller | `core/controller.py` | Single entry point for GUI/API. Creates processes, runs the six transition actions, queries process/hierarchy data, logs every outcome, notifies registered listeners. |
 | ProcessManager | `process/process_manager.py` | Process table (`dict[pid, Process]`), sequential unique PID generation, parent/child index, tree query, clear/reset. |
-| StateManager | `process/state_manager.py` | Owns `VALID_TRANSITIONS` and `ACTION_LABELS`; validates and applies transitions; reports valid actions for a state. Static methods, no state of its own. |
+| StateManager | `process/state_manager.py` | Owns `VALID_TRANSITIONS` and `ACTION_LABELS`; validates and applies transitions; reports valid actions for a state and explains rejections (`rejection_reason`). Static methods, no state of its own. |
 | Process | `process/process.py` | Thin wrapper exposing `pid`, `name`, `state` (property with setter), `priority` over its PCB. |
 | PCB | `process/pcb.py` | Dataclass holding the simulated control-block fields; randomises registers/memory in `__post_init__`; `to_dict()` for display. |
 | EventLogger | `core/event_logger.py` | Ordered `[HH:MM:SS] message` strings, `clear()`, listener callbacks. |
@@ -327,16 +330,27 @@ matches the current state; it iterates a `set`, so for RUNNING the three returne
 (`PREEMPT`, `BLOCK`, `TERMINATE`) have **unspecified order** — clients must treat the list
 as a set (the tests do).
 
+`StateManager.rejection_reason(process, action)` explains a refusal in one sentence: the
+action, the state it requires, the process's current state, and the actions that are valid
+right now, for example
+
+```
+DISPATCH requires state READY, but P1 is NEW; valid actions now: ADMIT
+```
+
+Unknown labels produce `Unknown action 'BOGUS'`; TERMINATED processes report
+`valid actions now: none`.
+
 Controller behaviour (`core/controller.py::_do_transition`):
 
-- Success → log `P{pid} ({name}) {FROM} -> {TO}`.
-- Rejection → log `P{pid} ({name}) REJECTED: {state} -> {ACTION}`.
-- Returns `(success, action)`; the HTTP layer turns this into a `TransitionResponse`.
+- Success → log `P{pid} ({name}) {FROM} -> {TO}`; returns `(True, action)`.
+- Rejection → log `P{pid} ({name}) REJECTED: {reason}`; returns `(False, reason)` where
+  `reason` is the `rejection_reason` text above.
 
-API behaviour: a rejected transition is **HTTP 200** with
-`{"success": false, "action": "DISPATCH", "from_state": null, "to_state": null,
-"message": "DISPATCH"}` — see the known-issues note in [§8.2](#82-known-issues). Unknown
-PIDs are HTTP 404. The state never changes on rejection (asserted by tests).
+API behaviour: a rejected transition is **HTTP 200** with a `TransitionResponse` whose
+`message` carries the reason — see the example in
+[§5.3](#postapiprocessespidadmitdispatchpreemptblockwaketerminate). Unknown PIDs are HTTP
+404. The state never changes on rejection (asserted by tests).
 
 ### 3.6 Parent-child relationships and process hierarchy
 
@@ -362,7 +376,7 @@ list; it also notifies optional listeners. Message vocabulary:
 | Creation (root) | `[16:32:40] P1 (Shell) CREATED` |
 | Creation (child) | `[16:32:40] P2 (Worker) CREATED (parent: P1)` |
 | Successful transition | `[16:32:40] P1 (Shell) NEW -> READY` |
-| Rejected transition | `[16:32:40] P2 (Worker) REJECTED: NEW -> DISPATCH` |
+| Rejected transition | `[16:32:40] P2 (Worker) REJECTED: DISPATCH requires state READY, but P2 is NEW; valid actions now: ADMIT` |
 | Reset | `[16:32:40] SIMULATION RESET` |
 
 `Controller.reset()`:
@@ -654,6 +668,8 @@ Responses:
   controller and mapped by the route).
 - `422` — schema violation, e.g. empty name:
   `{"detail": [{"type": "string_too_short", "loc": ["body", "name"], "msg": "String should have at least 1 character", "input": "", "ctx": {"min_length": 1}}]}`.
+  This is FastAPI's standard `HTTPValidationError` payload, which OpenAPI documents
+  automatically for this route.
 
 #### `GET /api/processes/{pid}`
 
@@ -678,11 +694,13 @@ No request body. Responses:
 ```
 
 ```json
-{"success": false, "action": "DISPATCH", "from_state": null, "to_state": null, "message": "DISPATCH"}
+{"success": false, "action": "DISPATCH", "from_state": null, "to_state": null, "message": "DISPATCH requires state READY, but P1 is NEW; valid actions now: ADMIT"}
 ```
 
 An invalid transition is therefore reported with HTTP 200 and `success: false`; the
-process state is unchanged and a `REJECTED` entry appears in the event log.
+`message` names the required state, the current state, and the actions that are legal right
+now (`valid actions now: none` for TERMINATED). The process state is unchanged and a
+`REJECTED` entry with the same text appears in the event log.
 
 #### `GET /api/processes/{pid}/parent`
 
@@ -722,9 +740,11 @@ See [§4.6](#46-scheduling-endpoints-example-requests-and-responses).
 | State transitions | Never raise; return `success: false` with HTTP **200** |
 | Scheduling engine | Raises `ValueError` for logically invalid inputs (defensive; normally intercepted by schema validation) |
 
-Note: `api/schemas.py` documents a 422 `ErrorResponse` model (`{"detail": "..."}`) for
-`POST /api/processes`, but FastAPI always emits its own list-shaped validation payload for
-422 — see [§8.2](#82-known-issues).
+`ErrorResponse` (`{"detail": "..."}`) is only declared for the 400 responses of
+`POST /api/processes`, which matches what those responses actually contain. 422 responses
+are left to FastAPI's own `HTTPValidationError` schema (a `detail` array), so the OpenAPI
+document now matches the wire format; the frontend client normalises both shapes (see
+[§6.3](#63-state-management-and-api-client)).
 
 ### 5.5 CORS configuration
 
@@ -778,7 +798,7 @@ Navigation is entirely component-level, using daisyUI tabs:
 | Component | Role |
 |---|---|
 | `Dashboard` | Top-level client component; owns all simulation state, fetch orchestration, tab layout, reset handling |
-| `Header` | Title bar, static "Backend Connected" indicator, Reset button |
+| `Header` | Title bar, backend status badge (polls `GET /api/health` every 30 s, shows checking / connected / disconnected), Reset button |
 | `ProcessExplorer` | Left rail: create button + process count, embeds `ProcessHierarchy` |
 | `ProcessHierarchy` | Recursive tree built from `parent_pid` relations; selection + keyboard access |
 | `ProcessStateGraph` | SVG state machine (see §6.4) |
@@ -788,7 +808,10 @@ Navigation is entirely component-level, using daisyUI tabs:
 | `EventLog` | Timestamped event list with empty/loading/error states and a retry button |
 | `ProcessCreationForm` | Name / priority / optional parent form → `POST /api/processes` |
 | `CpuSchedulingWorkspace` | Job table, algorithm + quantum controls, run/compare actions, Gantt timeline, metrics table |
-| `PCBViewer`, `Panel`, `StateMachine`, `StateVisualizer` | **Not imported anywhere** — retained from earlier iterations (dead code) |
+
+Four earlier components (`PCBViewer`, `Panel`, `StateMachine`, `StateVisualizer`) were
+removed: nothing imported them, and their roles are covered by `ProcessInspector`,
+`ProcessStateGraph`, and the DaisyUI panel styling.
 
 ### 6.3 State management and API client
 
@@ -798,13 +821,19 @@ Navigation is entirely component-level, using daisyUI tabs:
   getEvents])`; there is no polling or websocket — the client refetches after actions.
 - `lib/api.ts` wraps `fetch` with `fetchJson`/`handleResponse`, sets
   `Content-Type: application/json`, and throws an `ApiError` carrying `status`, `endpoint`,
-  and `detail` (parsed from `{"detail": ...}` responses).
+  and a **readable** `detail`. Error bodies are normalised in one place: a string `detail`
+  (from `HTTPException`) is used as-is, while FastAPI's 422 `detail` **array** is flattened
+  into `field: message` lines (`jobs[0].burst_time: Input should be greater than 0`),
+  dropping FastAPI's `Value error, ` prefix. Non-JSON bodies fall back to the status text.
 - Base URL: `process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000"`.
 - `types/api.ts` mirrors every backend schema (`PCBResponse`, `TransitionResponse`,
-  `SchedulingResult`, …) and declares `ProcessState` / `ProcessAction` unions.
-- Unused client helpers: `healthCheck`, `getProcess`, `getParent`, `getChildren` (defined,
-  not called by any component; the hierarchy tree is derived client-side from
-  `parent_pid`).
+  `SchedulingResult`, …), declares the `ProcessState` / `ProcessAction` unions, and models
+  the error body as `detail: string | ApiValidationIssue[]` to match the API contract.
+- Client helpers: `healthCheck` (used by `Header`), `getProcesses`, `createProcess`,
+  `getValidActions`, the six transition methods, `getProcessTree`, `getEvents`, `resetSimulation`,
+  `runScheduling`, `compareScheduling`. Helpers for `GET /processes/{pid}`, `/parent`, and
+  `/children` were removed — the UI builds its hierarchy from `parent_pid` in
+  `getProcesses`, and those endpoints remain available (and tested) for API clients.
 - `lib/processState.ts` is presentation-only: state colours/badges, SVG palette, the static
   `ACTION_TRANSITIONS` map, and helpers such as `isValidTransition`. Comment and code both
   enforce that *allowability* comes from the backend, not from this file.
@@ -832,12 +861,15 @@ cards.
 
 | File | Contents |
 |---|---|
-| `frontend/package.json` | Scripts: `dev`, `build`, `start`, `lint` (broken, see §8.2); deps: `next ^16`, `react ^19`, `react-dom ^19`, `daisyui ^5`; dev deps: Tailwind 4 toolchain, TypeScript `^5.6` |
-| `frontend/next.config.js` | `reactStrictMode: true` only |
-| `frontend/tsconfig.json` | `strict: true`, `noEmit`, path alias `@/*` → `./*` |
-| `frontend/postcss.config.mjs` | `@tailwindcss/postcss` + `autoprefixer` |
-| `frontend/tailwind.config.ts` | Content globs for `app/` and `components/` |
+| `frontend/package.json` | Scripts: `dev`, `build`, `start`, `lint` (`tsc --noEmit`); deps: `next ^16`, `react ^19`, `react-dom ^19`, `daisyui ^5`; dev deps: Tailwind 4 toolchain, TypeScript `^5.6` |
+| `frontend/next.config.js` | `reactStrictMode: true` and `turbopack.root` (scopes Turbopack to `frontend/`) |
+| `frontend/tsconfig.json` | `strict`, `noUnusedLocals`, `noUnusedParameters`, `noEmit`, path alias `@/*` → `./*` |
+| `frontend/postcss.config.mjs` | `@tailwindcss/postcss` + `autoprefixer` (removing `autoprefixer` changes the emitted CSS, so it is kept) |
 | `frontend/.env.local` | `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000` (git-ignored) |
+
+`frontend/tailwind.config.ts` was removed: with Tailwind 4's CSS-first setup (`@import
+"tailwindcss"`, automatic source detection, no `@config` directive) it had no effect — the
+production CSS was byte-identical with and without it.
 
 Styling: Tailwind CSS 4 CSS-first configuration (`@import "tailwindcss"`), daisyUI 5 loaded
 via `@plugin "daisyui"` with a custom default theme named `process-lab` (light,
@@ -921,8 +953,8 @@ python -m pytest tests/ -v          # 147 tests
 
 # frontend
 cd frontend
-pnpm exec tsc --noEmit               # type check
-pnpm build                           # production build
+pnpm lint                           # tsc --noEmit (incl. noUnusedLocals/Parameters)
+pnpm build                          # production build
 ```
 
 Detailed inventories, verified outputs, and caveats are in [TESTING.md](TESTING.md).
@@ -934,8 +966,8 @@ Detailed inventories, verified outputs, and caveats are in [TESTING.md](TESTING.
 | Frontend shows "Failed to load processes" | Backend not running, or wrong URL | Start uvicorn on 8000; check `NEXT_PUBLIC_API_URL` |
 | Browser console: CORS error | Request from an origin not in `allow_origins` | Use `localhost:3000` / `127.0.0.1:3000`, or extend the list in `api/main.py` |
 | `error while attempting to bind on address … already in use` | Port 8000/3000 occupied | Stop the other process or change the port (and `NEXT_PUBLIC_API_URL`) |
-| `pnpm lint` fails with "Invalid project directory … /lint" | Next.js 16 removed `next lint` | Use `pnpm exec tsc --noEmit` |
-| Warning "Next.js ignored pnpm-lock.yaml in /home/lenovowsl …" | A stray `pnpm-lock.yaml` outside the repository (workspace home) | Harmless; remove it or set `turbopack.root` in `next.config.js` |
+| `pnpm lint` reports a type error | TypeScript issue in `frontend/` | Read the file/line in the output; `pnpm lint` is `tsc --noEmit` with unused-code checks |
+| Build prints "Next.js ignored pnpm-lock.yaml in <parent dir>" | Turbopack walked above the project looking for lockfiles | Fixed in the current config: `turbopack.root` in `frontend/next.config.js` scopes the build to `frontend/` (verified the warning is gone) |
 | `StarletteDeprecationWarning: Using httpx with starlette.testclient is deprecated` | Installed starlette/httpx generation skew | Informational; see [TESTING.md](TESTING.md) for impact on tests |
 | `python main.py` raises `TclError: no display name` | Headless environment | Run on a machine with a display (`DISPLAY` set) |
 | `ModuleNotFoundError: No module named 'api'` | Wrong working directory | Run commands from the repository root |
@@ -965,34 +997,42 @@ runner), visual rendering, CORS behaviour, and the `pnpm build` output (verified
 
 ### 8.2 Known issues
 
+Remaining:
+
 1. **API test hang (previously reported)** — a hang in `tests/test_api.py` was reported
-   earlier in the project. It is **not reproducible in the current environment**: on
-   13 Oct 2026 `python -m pytest tests/test_api.py -v` completed 45 tests in ~0.5 s and the
-   full suite completed 147 tests in 0.55–0.60 s across repeated runs (see [TESTING.md](TESTING.md)). If
-   it recurs, run the module alone under a shell timeout
+   earlier in the project. It is **not reproducible in the current environment**: on 13 and
+   14 Oct 2026 the module completed its 45 tests in well under a second and the full suite
+   completed 147 tests in ~1.3 s (see [TESTING.md](TESTING.md)). If it recurs, run the
+   module alone under a shell timeout
    (`timeout 120 python -m pytest tests/test_api.py -v`) to confirm, then check the
    starlette/httpx versions — the suite currently emits
    `StarletteDeprecationWarning: Using httpx with starlette.testclient is deprecated;
    install httpx2 instead`, and running with `-W error::DeprecationWarning` turns the anyio
    deprecation warning into a **collection error** in `test_api.py`. Residual risk:
    unresolved until a scenario that reproduces the hang is identified.
-2. **`pnpm lint` is broken** — `next lint` was removed in Next.js 16, so the `lint` script
-   fails with `Invalid project directory provided, no such directory: …/frontend/lint`.
-3. **Rejected transitions echo the action as `message`** — for `success: false` the API
-   returns `message: "DISPATCH"` (the action name) rather than a human-readable reason,
-   because `Controller._do_transition` returns the action as its message.
-4. **Declared 422 schema ≠ actual payload** — `ErrorResponse` documents
-   `{"detail": "…"}`, but FastAPI emits a list-shaped `detail` for 422. The frontend
-   client types `detail` as a string, so a 422 reaching the UI would render as
-   `[object Object]` (currently masked by client-side validation in the scheduling and
-   creation forms).
-5. **Static "Backend Connected" indicator** — the header badge is decorative; it does not
-   call `/api/health` (though `api.healthCheck` exists).
-6. **Dead frontend components** — `PCBViewer`, `Panel`, `StateMachine`, and
-   `StateVisualizer` are not imported by any page or component.
-7. **Deprecation warnings during pytest** — two warnings originate from the installed
+2. **Deprecation warnings during pytest** — the two warnings originate from the installed
    starlette/httpx/anyio stack, not from project code.
-8. **No lint/type gate in CI** — checks are manual (`tsc`, `pytest`, `pnpm build`).
+3. **No lint/type gate in CI** — checks are manual (`pnpm lint`, `pytest`, `pnpm build`);
+   the project has no CI configuration.
+4. **No frontend or GUI automated tests** — React components and the Tkinter app are
+   verified by hand.
+
+Resolved in the documentation/cleanup pass (kept here so the history is visible):
+
+- `pnpm lint` was `next lint`, removed in Next.js 16; it now runs `tsc --noEmit` with
+  `noUnusedLocals`/`noUnusedParameters` and passes.
+- Rejected transitions returned `message: "<ACTION>"`; `StateManager.rejection_reason()`
+  now produces a sentence naming the required state, the current state, and the actions
+  that are legal right now, and both the API and the UI surface it.
+- OpenAPI declared 422 as `ErrorResponse` (`detail: string`) while FastAPI actually emits a
+  `detail` array; the misleading declaration was removed and the frontend normalises both
+  shapes, so validation errors render as readable text instead of `[object Object]`.
+- The header's "Backend Connected" badge was static; it now polls `GET /api/health`
+  (checking / connected / disconnected, 30 s interval, cleaned up on unmount).
+- Dead code removed: components `PCBViewer`, `Panel`, `StateMachine`, `StateVisualizer`,
+  the unused `getProcess`/`getParent`/`getChildren` client helpers, and the unused
+  `frontend/tailwind.config.ts` (Tailwind 4 ignores it; the build CSS was byte-identical
+  with and without it).
 
 ### 8.3 Missing functionality and realistic future improvements
 
@@ -1003,6 +1043,5 @@ runner), visual rendering, CORS behaviour, and the `pnpm build` output (verified
 | Persistence of simulation state | Optional JSON snapshot/restore endpoint |
 | Deletion/GC of TERMINATED processes | `DELETE /api/processes/{pid}` reusing `ProcessManager.remove_process`, plus tests |
 | Frontend tests | Add Vitest/React Testing Library for `CpuSchedulingWorkspace` and `TransitionControls` |
-| Working lint | Replace `next lint` with ESLint 9 flat config or remove the script |
-| Health-driven UI status | Wire the header badge to `api.healthCheck()` |
+| Stricter style enforcement | Add ESLint 9 flat config with `eslint-config-next` (deliberately not added: it would introduce a new tool) |
 | GUI coverage | The Tkinter path has no automated tests; consider smoke-testing widget construction |

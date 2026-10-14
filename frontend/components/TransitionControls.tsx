@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
+import type { TransitionResponse } from "@/types/api";
 
 interface TransitionControlsProps {
   pid: number | null;
@@ -51,11 +52,16 @@ export function TransitionControls({ pid, processState, onTransition, onActionSt
     onActionStart?.(action);
     try {
       const startedAt = Date.now();
-      const calls: Record<string, (processPid: number) => Promise<unknown>> = {
+      const calls: Record<string, (processPid: number) => Promise<TransitionResponse>> = {
         ADMIT: api.admitProcess, DISPATCH: api.dispatchProcess, PREEMPT: api.preemptProcess,
         BLOCK: api.blockProcess, WAKE: api.wakeProcess, TERMINATE: api.terminateProcess,
       };
-      await calls[action](pid);
+      const response = await calls[action](pid);
+      if (!response.success) {
+        setError(response.message ?? `${action} is not valid for this process.`);
+        await onTransition();
+        return;
+      }
       const remaining = DEMO_TRANSITION_MS - (Date.now() - startedAt);
       if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
       await onTransition();

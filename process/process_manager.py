@@ -10,7 +10,7 @@ from process.process import Process
 class ProcessManager:
     """Manages process creation, lookup, storage, and parent-child hierarchy.
 
-    Uses a dictionary keyed by PID. PIDs are never recycled in V1.0.
+    Uses a dictionary keyed by PID. PIDs are never recycled once issued.
     A process may have zero or one parent and zero or more children.
     """
 

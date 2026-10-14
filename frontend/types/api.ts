@@ -67,8 +67,22 @@ export interface HealthCheckResponse {
   status: string;
 }
 
+/**
+ * Error body returned by the API.
+ *
+ * Application errors raised through `HTTPException` carry a plain string in
+ * `detail`. Request-body validation failures (HTTP 422) carry FastAPI's list of
+ * validation issues instead; the client normalises both into a readable string.
+ */
+export interface ApiValidationIssue {
+  type?: string;
+  loc?: (string | number)[];
+  msg: string;
+  input?: unknown;
+}
+
 export interface ApiErrorResponse {
-  detail: string;
+  detail: string | ApiValidationIssue[];
 }
 
 export type SchedulingAlgorithm = "FCFS" | "SJF" | "PRIORITY" | "ROUND_ROBIN";

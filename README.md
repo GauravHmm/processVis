@@ -38,6 +38,10 @@ Two interfaces are provided:
 - **Transition controls** (ADMIT, DISPATCH, PREEMPT, BLOCK, WAKE, TERMINATE) enabled only
   for actions the backend reports as valid
 - **Event log** with timestamped entries (created / transitions / rejected / reset)
+- **Rejection explanations** — invalid actions are refused with the required state,
+  the current state, and the actions that are valid right now
+- **Backend status badge** in the header (polls `GET /api/health`: connected /
+  disconnected / checking)
 - **Reset** clears all processes, hierarchy, events, and the PID counter
 - **CPU Scheduling workspace** with job input table, single-algorithm run, four-algorithm
   comparison, Gantt timeline, per-job metrics, and averages
@@ -141,7 +145,7 @@ process-creation-visualizer/
 │   └── package.json
 ├── gui/                        # Tkinter desktop interface
 ├── tests/                      # pytest suite (147 tests)
-├── docs/                       # Technical documentation and testing guide
+├── docs/                       # Technical, user, viva, and testing documentation
 ├── main.py                     # Tkinter entry point
 └── requirements.txt
 ```
@@ -206,11 +210,12 @@ source venv/bin/activate
 python -m pytest tests/ -v
 ```
 
-All **147** tests are expected to pass. Frontend type checking and production build:
+All **147** tests are expected to pass. Frontend type checking (with unused-code
+checks) and production build:
 
 ```bash
 cd frontend
-pnpm exec tsc --noEmit
+pnpm lint        # tsc --noEmit (noUnusedLocals, noUnusedParameters)
 pnpm build
 ```
 
@@ -265,6 +270,8 @@ pnpm
 |----------|----------|
 | [README.md](README.md) | Overview, quick start, feature summary |
 | [docs/TECHNICAL_DOCUMENTATION.md](docs/TECHNICAL_DOCUMENTATION.md) | Architecture, simulator, scheduling engine, full API reference, frontend, setup and troubleshooting |
+| [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | How to operate both interfaces, scheduling workspace, errors and troubleshooting |
+| [docs/PROJECT_EXPLANATION.md](docs/PROJECT_EXPLANATION.md) | Beginner-friendly explanation, simulated vs real OS, presentation script, viva questions |
 | [docs/TESTING.md](docs/TESTING.md) | Test inventory, commands and verified results, known issues |
 
 ## Limitations
@@ -282,8 +289,6 @@ pnpm
 - No IPC, synchronization, shared memory, virtual memory, databases, authentication,
   WebSockets, or persistence — all state is in-memory and lost when the backend stops
 - No frontend automated tests (type checking and production build only)
-- `pnpm lint` is currently broken (Next.js 16 removed `next lint`); use
-  `pnpm exec tsc --noEmit` instead
 
 ## License
 

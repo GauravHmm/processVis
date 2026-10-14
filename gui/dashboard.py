@@ -15,7 +15,7 @@ import gui.theme as T
 
 
 class Dashboard(tk.Tk):
-    """Main application window for V1.1.
+    """Main application window for the desktop simulation.
 
     Layout:
       Header bar
