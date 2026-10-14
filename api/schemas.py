@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ProcessCreate(BaseModel):
@@ -91,3 +91,76 @@ class ErrorResponse(BaseModel):
     """Standard error response."""
 
     detail: str
+
+
+class SchedulingJob(BaseModel):
+    """CPU burst input, independent of simulated PCB execution fields."""
+
+    job_id: str = Field(..., min_length=1, max_length=64)
+    name: str = Field(..., min_length=1, max_length=64)
+    arrival_time: int = Field(..., ge=0)
+    burst_time: int = Field(..., gt=0)
+    priority: int = Field(..., ge=0, le=100)
+
+
+class SchedulingRequest(BaseModel):
+    jobs: List[SchedulingJob] = Field(..., min_length=1)
+    algorithm: Literal["FCFS", "SJF", "PRIORITY", "ROUND_ROBIN"]
+    time_quantum: Optional[int] = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_request(self):
+        ids = [job.job_id for job in self.jobs]
+        if len(ids) != len(set(ids)):
+            raise ValueError("job_id values must be unique within a scheduling request")
+        if self.algorithm == "ROUND_ROBIN" and self.time_quantum is None:
+            raise ValueError("Round Robin requires a positive integer time_quantum")
+        return self
+
+
+class SchedulingComparisonRequest(BaseModel):
+    jobs: List[SchedulingJob] = Field(..., min_length=1)
+    time_quantum: int = Field(..., gt=0)
+
+    @model_validator(mode="after")
+    def validate_jobs(self):
+        ids = [job.job_id for job in self.jobs]
+        if len(ids) != len(set(ids)):
+            raise ValueError("job_id values must be unique within a scheduling request")
+        return self
+
+
+class TimelineSegmentResponse(BaseModel):
+    job_id: Optional[str]
+    name: str
+    start_time: int
+    end_time: int
+    duration: int
+
+
+class JobMetricsResponse(BaseModel):
+    job_id: str
+    name: str
+    arrival_time: int
+    burst_time: int
+    priority: int
+    first_start_time: int
+    completion_time: int
+    waiting_time: int
+    turnaround_time: int
+    response_time: int
+
+
+class SchedulingResultResponse(BaseModel):
+    algorithm: str
+    time_quantum: Optional[int]
+    priority_convention: str
+    jobs: List[JobMetricsResponse]
+    timeline: List[TimelineSegmentResponse]
+    average_waiting_time: float
+    average_turnaround_time: float
+    average_response_time: float
+
+
+class SchedulingComparisonResponse(BaseModel):
+    results: Dict[str, SchedulingResultResponse]

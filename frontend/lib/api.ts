@@ -16,6 +16,10 @@ import type {
   ResetResponse,
   HealthCheckResponse,
   ApiErrorResponse,
+  SchedulingRequest,
+  SchedulingComparisonRequest,
+  SchedulingResult,
+  SchedulingComparisonResponse,
 } from "@/types/api";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
@@ -72,6 +76,14 @@ async function fetchJson<T>(
 export const api = {
   healthCheck: (): Promise<HealthCheckResponse> =>
     fetchJson<HealthCheckResponse>(`${API_BASE_URL}/api/health`, {}, "GET /api/health"),
+
+  runScheduling: (data: SchedulingRequest): Promise<SchedulingResult> =>
+    fetchJson<SchedulingResult>(`${API_BASE_URL}/api/scheduling/run`,
+      { method: "POST", body: JSON.stringify(data) }, "POST /api/scheduling/run"),
+
+  compareScheduling: (data: SchedulingComparisonRequest): Promise<SchedulingComparisonResponse> =>
+    fetchJson<SchedulingComparisonResponse>(`${API_BASE_URL}/api/scheduling/compare`,
+      { method: "POST", body: JSON.stringify(data) }, "POST /api/scheduling/compare"),
 
   // Process listing and creation
   getProcesses: (): Promise<ProcessListResponse> =>

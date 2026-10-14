@@ -15,8 +15,8 @@ import type { ProcessAction, ProcessState } from "@/types/api";
  * `validActions`. The graph never triggers transitions itself.
  */
 
-const NODE_RADIUS = 44;
-const VIEWBOX_WIDTH = 1000;
+const NODE_RADIUS = 42;
+const VIEWBOX_WIDTH = 760;
 const VIEWBOX_HEIGHT = 430;
 const PARTICLE_DURATION_MS = 1200;
 
@@ -27,7 +27,7 @@ interface NodeDef {
 }
 
 /**
- * Node geometry, laid out to use the wide (≈70%) state-machine column:
+ * Node geometry uses a centered primary column and evenly spaced side states:
  *
  *                 NEW
  *                  |
@@ -40,11 +40,11 @@ interface NodeDef {
  *            \__ WAKE __/
  */
 const NODE_DEFS: NodeDef[] = [
-  { state: "NEW", x: 500, y: 52 },
-  { state: "READY", x: 500, y: 158 },
-  { state: "RUNNING", x: 500, y: 316 },
-  { state: "BLOCKED", x: 150, y: 316 },
-  { state: "TERMINATED", x: 850, y: 316 },
+  { state: "NEW", x: 380, y: 68 },
+  { state: "READY", x: 380, y: 196 },
+  { state: "RUNNING", x: 380, y: 350 },
+  { state: "BLOCKED", x: 140, y: 350 },
+  { state: "TERMINATED", x: 620, y: 350 },
 ];
 
 interface EdgeDef {
@@ -66,72 +66,72 @@ const EDGE_DEFS: EdgeDef[] = [
     action: "ADMIT",
     from: "NEW",
     to: "READY",
-    path: "M 500 96 L 500 114",
-    endX: 500,
-    endY: 114,
+    path: "M 380 110 L 380 152",
+    endX: 380,
+    endY: 154,
     endAngle: 90,
-    labelX: 516,
-    labelY: 105,
+    labelX: 396,
+    labelY: 132,
     labelAnchor: "start",
   },
   {
     action: "DISPATCH",
     from: "READY",
     to: "RUNNING",
-    path: "M 500 202 L 500 272",
-    endX: 500,
-    endY: 272,
+    path: "M 380 238 L 380 306",
+    endX: 380,
+    endY: 306,
     endAngle: 90,
-    labelX: 516,
-    labelY: 238,
+    labelX: 396,
+    labelY: 273,
     labelAnchor: "start",
   },
   {
     action: "PREEMPT",
     from: "RUNNING",
     to: "READY",
-    path: "M 456 288 C 330 282 328 208 456 198",
-    endX: 456,
-    endY: 198,
-    endAngle: -3.5,
-    labelX: 336,
-    labelY: 253,
+    path: "M 344 328 C 286 310 286 242 346 221",
+    endX: 346,
+    endY: 221,
+    endAngle: -19.3,
+    labelX: 292,
+    labelY: 276,
     labelAnchor: "end",
   },
   {
     action: "BLOCK",
     from: "RUNNING",
     to: "BLOCKED",
-    path: "M 456 316 L 194 316",
-    endX: 194,
-    endY: 316,
+    path: "M 338 350 L 182 350",
+    endX: 182,
+    endY: 350,
     endAngle: 180,
-    labelX: 325,
-    labelY: 300,
+    labelX: 260,
+    labelY: 332,
     labelAnchor: "middle",
   },
   {
     action: "WAKE",
     from: "BLOCKED",
     to: "READY",
-    path: "M 150 272 C 150 204 300 158 456 158",
-    endX: 456,
-    endY: 158,
+    path: "M 140 308 C 146 244 238 196 338 196",
+    endX: 338,
+    endY: 196,
     endAngle: 0,
-    labelX: 243,
-    labelY: 217,
+    labelX: 218,
+    labelY: 231,
     labelAnchor: "middle",
   },
   {
     action: "TERMINATE",
     from: "RUNNING",
     to: "TERMINATED",
-    path: "M 544 316 L 806 316",
-    endX: 806,
-    endY: 316,
+    path: "M 422 350 L 578 350",
+    endX: 578,
+    endY: 350,
     endAngle: 0,
-    labelX: 675,
-    labelY: 300,
+    labelX: 500,
+    labelY: 332,
     labelAnchor: "middle",
   },
 ];
@@ -242,7 +242,7 @@ export function ProcessStateGraph({
               : is_valid
                 ? sourceColors.stroke
                 : "#94a3b8";
-            const strokeWidth = isActive ? 3.5 : is_valid ? 2.5 : 1.75;
+            const strokeWidth = isActive ? 3 : is_valid ? 2.25 : 1.75;
             const labelFill = isActive
               ? "var(--color-primary, #d97706)"
               : is_valid
@@ -275,12 +275,12 @@ export function ProcessStateGraph({
                   y={edge.labelY}
                   textAnchor={edge.labelAnchor}
                   dominantBaseline="middle"
-                  fontSize={15}
+                  fontSize={14}
                   fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
                   fontWeight={isActive ? 700 : is_valid ? 600 : 500}
                   fill={labelFill}
-                  stroke="#fff"
-                  strokeWidth={4}
+                  stroke="#f8fafc"
+                  strokeWidth={5}
                   opacity={currentState === null || currentState === transition.from || is_valid || isActive ? 1 : 0.55}
                   style={{ paintOrder: "stroke", transition: "fill 250ms ease, opacity 250ms ease" }}
                 >
@@ -296,7 +296,7 @@ export function ProcessStateGraph({
               key={`target-${targetNode.state}`}
               cx={targetNode.x}
               cy={targetNode.y}
-              r={NODE_RADIUS + 8}
+              r={NODE_RADIUS + 7}
               fill="none"
               stroke="var(--color-primary, #d97706)"
               strokeWidth={3}
@@ -317,8 +317,10 @@ export function ProcessStateGraph({
                   <circle
                     cx={node.x}
                     cy={node.y}
-                    r={NODE_RADIUS + 10}
-                    fill={colors.glow}
+                    r={NODE_RADIUS + 6}
+                    fill="none"
+                    stroke={colors.glow}
+                    strokeWidth={7}
                   />
                 )}
                 <circle
@@ -327,9 +329,9 @@ export function ProcessStateGraph({
                   r={NODE_RADIUS}
                   fill={colors.fill}
                   stroke={colors.stroke}
-                  strokeWidth={isCurrent ? 3.5 : 2}
+                  strokeWidth={2.25}
                   opacity={currentState === null || isCurrent ? 1 : 0.62}
-                  style={{ transition: "stroke-width 250ms ease, opacity 250ms ease" }}
+                  style={{ transition: "opacity 250ms ease" }}
                 />
                 <text
                   x={node.x}
@@ -347,19 +349,19 @@ export function ProcessStateGraph({
                 {count > 0 && (
                   <g>
                     <circle
-                      cx={node.x + NODE_RADIUS - 6}
-                      cy={node.y + NODE_RADIUS - 6}
-                      r={13}
+                      cx={node.x + NODE_RADIUS - 3}
+                      cy={node.y - NODE_RADIUS + 3}
+                      r={11}
                       fill={colors.stroke}
                       stroke="#fff"
                       strokeWidth={2}
                     />
                     <text
-                      x={node.x + NODE_RADIUS - 6}
-                      y={node.y + NODE_RADIUS - 6}
+                      x={node.x + NODE_RADIUS - 3}
+                      y={node.y - NODE_RADIUS + 3}
                       textAnchor="middle"
                       dominantBaseline="central"
-                      fontSize={12}
+                      fontSize={11}
                       fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
                       fontWeight={700}
                       fill="#fff"
@@ -367,16 +369,6 @@ export function ProcessStateGraph({
                       {count}
                     </text>
                   </g>
-                )}
-                {isCurrent && (
-                  <circle
-                    cx={node.x}
-                    cy={node.y - NODE_RADIUS}
-                    r={6}
-                    fill={colors.stroke}
-                    stroke="#fff"
-                    strokeWidth={2}
-                  />
                 )}
               </g>
             );

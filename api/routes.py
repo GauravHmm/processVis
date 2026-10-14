@@ -16,13 +16,49 @@ from api.schemas import (
     ProcessListResponse,
     ProcessTreeResponse,
     ResetResponse,
+    SchedulingComparisonRequest,
+    SchedulingComparisonResponse,
+    SchedulingRequest,
+    SchedulingResultResponse,
     TransitionResponse,
     ValidActionsResponse,
 )
 from core.controller import Controller
+from scheduling.engine import ALGORITHMS, JobInput, run_schedule
 
 
 router = APIRouter()
+
+
+def _schedule(payload_jobs, algorithm: str, time_quantum: Optional[int]) -> SchedulingResultResponse:
+    jobs = [JobInput(**job.model_dump()) for job in payload_jobs]
+    result = run_schedule(jobs, algorithm, time_quantum)
+    return SchedulingResultResponse(**{
+        "algorithm": result.algorithm,
+        "time_quantum": result.time_quantum,
+        "priority_convention": result.priority_convention,
+        "jobs": [job.__dict__ for job in result.jobs],
+        "timeline": [segment.__dict__ for segment in result.timeline],
+        "average_waiting_time": result.average_waiting_time,
+        "average_turnaround_time": result.average_turnaround_time,
+        "average_response_time": result.average_response_time,
+    })
+
+
+@router.post("/scheduling/run", response_model=SchedulingResultResponse)
+async def run_scheduling(payload: SchedulingRequest) -> SchedulingResultResponse:
+    """Run one scheduling algorithm without changing interactive processes."""
+    return _schedule(payload.jobs, payload.algorithm, payload.time_quantum)
+
+
+@router.post("/scheduling/compare", response_model=SchedulingComparisonResponse)
+async def compare_scheduling(payload: SchedulingComparisonRequest) -> SchedulingComparisonResponse:
+    """Run all four algorithms against the exact same job inputs."""
+    return SchedulingComparisonResponse(results={
+        algorithm: _schedule(payload.jobs, algorithm,
+                             payload.time_quantum if algorithm == "ROUND_ROBIN" else None)
+        for algorithm in ALGORITHMS
+    })
 
 # Single controller instance (simulation state)
 _controller: Optional[Controller] = None

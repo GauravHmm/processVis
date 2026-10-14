@@ -71,6 +71,11 @@
 .state-edge-active { animation: state-edge-active 900ms ease-in-out infinite; }
 .node-target-pulse { animation: node-target-pulse 900ms ease-in-out infinite; transform-box: fill-box; }
 
+@media (prefers-reduced-motion: reduce) {
+  .state-edge-active,
+  .node-target-pulse { animation: none; }
+}
+
 button:focus-visible,
 [role="tab"]:focus-visible,
 [role="treeitem"]:focus-visible {

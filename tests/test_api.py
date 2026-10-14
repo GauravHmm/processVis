@@ -88,6 +88,43 @@ class TestProcessCreation:
         assert response.status_code == 422
 
 
+class TestSchedulingAPI:
+    def test_run_sjf_returns_metrics_and_idle_timeline_without_changing_processes(self):
+        client.post("/api/processes", json={"name": "Existing"})
+        payload = {"algorithm": "SJF", "jobs": [
+            {"job_id": "late", "name": "Late", "arrival_time": 4, "burst_time": 2, "priority": 1},
+            {"job_id": "first", "name": "First", "arrival_time": 0, "burst_time": 1, "priority": 1},
+        ]}
+        response = client.post("/api/scheduling/run", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        assert [(s["job_id"], s["start_time"], s["end_time"]) for s in data["timeline"]] == [
+            ("first", 0, 1), (None, 1, 4), ("late", 4, 6)]
+        assert data["jobs"][0]["waiting_time"] == 0
+        assert client.get("/api/processes/1").json()["state"] == "NEW"
+
+    def test_compare_runs_all_algorithms_on_same_jobs(self):
+        jobs = [{"job_id": "a", "name": "A", "arrival_time": 0, "burst_time": 4, "priority": 1},
+                {"job_id": "b", "name": "B", "arrival_time": 1, "burst_time": 1, "priority": 9}]
+        response = client.post("/api/scheduling/compare", json={"jobs": jobs, "time_quantum": 2})
+        assert response.status_code == 200
+        data = response.json()["results"]
+        assert set(data) == {"FCFS", "SJF", "PRIORITY", "ROUND_ROBIN"}
+        assert data["FCFS"]["timeline"][0]["job_id"] == "a"
+        assert [(s["job_id"], s["start_time"], s["end_time"]) for s in data["ROUND_ROBIN"]["timeline"]] == [
+            ("a", 0, 2), ("b", 2, 3), ("a", 3, 5)]
+
+    @pytest.mark.parametrize("payload", [
+        {"algorithm": "FCFS", "jobs": []},
+        {"algorithm": "FCFS", "jobs": [{"job_id": "x", "name": "X", "arrival_time": -1, "burst_time": 1, "priority": 0}]},
+        {"algorithm": "FCFS", "jobs": [{"job_id": "x", "name": "X", "arrival_time": 0, "burst_time": 0, "priority": 0}]},
+        {"algorithm": "ROUND_ROBIN", "jobs": [{"job_id": "x", "name": "X", "arrival_time": 0, "burst_time": 1, "priority": 0}]},
+        {"algorithm": "ROUND_ROBIN", "time_quantum": 0, "jobs": [{"job_id": "x", "name": "X", "arrival_time": 0, "burst_time": 1, "priority": 0}]},
+        {"algorithm": "FCFS", "jobs": [{"job_id": "x", "name": "X", "arrival_time": 0, "burst_time": 1, "priority": 0}, {"job_id": "x", "name": "Y", "arrival_time": 0, "burst_time": 1, "priority": 0}]},
+    ])
+    def test_invalid_scheduling_request_returns_422(self, payload):
+        assert client.post("/api/scheduling/run", json=payload).status_code == 422
+
 class TestProcessRetrieval:
     def test_get_all_processes(self):
         client.post("/api/processes", json={"name": "P1"})

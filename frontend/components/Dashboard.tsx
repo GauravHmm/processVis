@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import type { EventsResponse, PCBResponse } from "@/types/api";
+import { CpuSchedulingWorkspace } from "./CpuSchedulingWorkspace";
 import { EventLog } from "./EventLog";
 import { Header } from "./Header";
 import { ProcessCreationForm } from "./ProcessCreationForm";
@@ -13,6 +14,7 @@ import { ProcessTable } from "./ProcessTable";
 import { TransitionControls } from "./TransitionControls";
 
 type BottomTab = "table" | "events";
+type WorkspaceTab = "processes" | "scheduling";
 
 export function Dashboard() {
   const [processes, setProcesses] = useState<PCBResponse[]>([]);
@@ -26,6 +28,7 @@ export function Dashboard() {
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [bottomTab, setBottomTab] = useState<BottomTab>("table");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("processes");
 
   const loadProcesses = async () => {
     try {
@@ -87,7 +90,13 @@ export function Dashboard() {
   return (
     <div className="flex h-screen min-h-[600px] flex-col overflow-hidden bg-base-200 text-base-content">
       <Header onReset={handleReset} isResetting={isResetting} />
-      <main className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_190px]">
+      <div className="flex h-10 shrink-0 items-center border-b border-base-300 bg-base-100 px-3">
+        <div className="tabs tabs-bordered h-full" role="tablist" aria-label="Application workspace">
+          <button type="button" role="tab" aria-selected={workspaceTab === "processes"} className={`tab h-full text-sm font-medium ${workspaceTab === "processes" ? "tab-active" : ""}`} onClick={() => setWorkspaceTab("processes")}>Process Simulator</button>
+          <button type="button" role="tab" aria-selected={workspaceTab === "scheduling"} className={`tab h-full text-sm font-medium ${workspaceTab === "scheduling" ? "tab-active" : ""}`} onClick={() => setWorkspaceTab("scheduling")}>CPU Scheduling</button>
+        </div>
+      </div>
+      {workspaceTab === "processes" ? <main className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_190px]">
         <div className="grid min-h-0 grid-cols-1 lg:grid-cols-[minmax(210px,24%)_minmax(0,1fr)_minmax(260px,26%)]">
           <aside className="min-h-0 overflow-y-auto border-b border-base-300 bg-base-100 lg:border-b-0 lg:border-r">
             <ProcessExplorer processes={processes} selectedPid={selectedPid} onSelect={handleSelectProcess} onCreate={() => setIsCreateOpen(true)} isLoading={isLoading} error={error} />
@@ -129,7 +138,7 @@ export function Dashboard() {
             {bottomTab === "table" ? <ProcessTable processes={processes} selectedPid={selectedPid} onSelect={handleSelectProcess} isLoading={isLoading} error={error} /> : <EventLog events={events} isLoading={isLoading} error={eventsError} onRefresh={loadEvents} />}
           </div>
         </section>
-      </main>
+      </main> : <main className="min-h-0 flex-1"><CpuSchedulingWorkspace /></main>}
 
       {isCreateOpen && (
         <dialog open aria-modal="true" aria-labelledby="create-process-title" className="modal modal-bottom sm:modal-middle" onCancel={() => setIsCreateOpen(false)}>

@@ -71,6 +71,58 @@ export interface ApiErrorResponse {
   detail: string;
 }
 
+export type SchedulingAlgorithm = "FCFS" | "SJF" | "PRIORITY" | "ROUND_ROBIN";
+
+export interface SchedulingJobInput {
+  job_id: string;
+  name: string;
+  arrival_time: number;
+  burst_time: number;
+  priority: number;
+}
+
+export interface SchedulingRequest {
+  jobs: SchedulingJobInput[];
+  algorithm: SchedulingAlgorithm;
+  time_quantum?: number;
+}
+
+export interface SchedulingComparisonRequest {
+  jobs: SchedulingJobInput[];
+  time_quantum: number;
+}
+
+export interface SchedulingTimelineSegment {
+  job_id: string | null;
+  name: string;
+  start_time: number;
+  end_time: number;
+  duration: number;
+}
+
+export interface SchedulingJobMetrics extends SchedulingJobInput {
+  first_start_time: number;
+  completion_time: number;
+  waiting_time: number;
+  turnaround_time: number;
+  response_time: number;
+}
+
+export interface SchedulingResult {
+  algorithm: SchedulingAlgorithm;
+  time_quantum: number | null;
+  priority_convention: string;
+  jobs: SchedulingJobMetrics[];
+  timeline: SchedulingTimelineSegment[];
+  average_waiting_time: number;
+  average_turnaround_time: number;
+  average_response_time: number;
+}
+
+export interface SchedulingComparisonResponse {
+  results: Record<SchedulingAlgorithm, SchedulingResult>;
+}
+
 export type ProcessState =
   | "NEW"
   | "READY"
