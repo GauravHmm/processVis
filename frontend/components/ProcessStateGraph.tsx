@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { PCBResponse } from "@/types/api";
 import { getActionTransition, getStateSvgColors } from "@/lib/processState";
 import type { ProcessAction, ProcessState } from "@/types/api";
+import type { PlaybackTransitionAnimation } from "@/lib/schedulingPlayback";
 
 /**
  * Process state machine graph.
@@ -143,6 +144,18 @@ interface ProcessStateGraphProps {
   validActions: string[];
   /** Action currently being executed, if any (drives the flow animation). */
   pendingAction: string | null;
+  /** Optional independent job state used by scheduling playback. */
+  playback?: {
+    jobs: { job_id: string; name: string; state: ProcessState }[];
+    activeAction: ProcessAction | null;
+    activeJobId: string | null;
+    runningJobId: string | null;
+    animationEvents: PlaybackTransitionAnimation[];
+    animationResetKey: number;
+    isPlaying: boolean;
+    playbackSpeed: number;
+    isAtEnd: boolean;
+  };
 }
 
 function arrowPolygon(x: number, y: number, angleDeg: number): string {
@@ -161,27 +174,170 @@ export function ProcessStateGraph({
   selectedPid,
   validActions,
   pendingAction,
+  playback,
 }: ProcessStateGraphProps) {
   const pathRefs = useRef<Record<string, SVGPathElement | null>>({});
   const particleRef = useRef<SVGGElement | null>(null);
+  const [movingTransition, setMovingTransition] = useState<PlaybackTransitionAnimation | null>(null);
+  const [fallbackTransition, setFallbackTransition] = useState<PlaybackTransitionAnimation | null>(null);
+  const transitionQueueRef = useRef<PlaybackTransitionAnimation[]>([]);
+  const activeTransitionRef = useRef<PlaybackTransitionAnimation | null>(null);
+  const observedEventIdsRef = useRef<Set<string>>(new Set());
+  const animationProgressRef = useRef(0);
 
   const selectedProcess = processes.find((p) => p.pid === selectedPid) ?? null;
   const currentState = selectedProcess?.state ?? null;
-
+  const displayProcesses = playback?.jobs ?? processes.map((process) => ({
+    job_id: `P${process.pid}`,
+    name: process.name,
+    state: process.state as ProcessState,
+  }));
+  const displayCurrentState = playback
+    ? playback.jobs.find((job) => job.job_id === playback.runningJobId)?.state
+      ?? playback.jobs.find((job) => job.job_id === playback.activeJobId)?.state
+      ?? null
+    : currentState;
   const stateCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const proc of processes) {
+    for (const proc of displayProcesses) {
       counts[proc.state] = (counts[proc.state] ?? 0) + 1;
     }
     return counts;
-  }, [processes]);
+  }, [displayProcesses]);
 
-  const activeEdge = pendingAction
-    ? EDGE_DEFS.find((edge) => edge.action === pendingAction)
+  const action = playback
+    ? movingTransition?.action ?? playback.activeAction
+    : pendingAction;
+  const activeEdge = action
+    ? EDGE_DEFS.find((edge) => edge.action === action)
     : undefined;
 
-  // Particle travelling along the active edge (data/process flow).
+  // A seek or schedule change cancels all pending visual transitions.
   useEffect(() => {
+    if (!playback) return;
+    transitionQueueRef.current = [];
+    activeTransitionRef.current = null;
+    observedEventIdsRef.current.clear();
+    animationProgressRef.current = 0;
+    setMovingTransition(null);
+    setFallbackTransition(null);
+    if (particleRef.current) particleRef.current.style.visibility = "hidden";
+  }, [Boolean(playback), playback?.animationResetKey]);
+
+  // Record each newly selected event once. Simultaneous events queue in the
+  // stable order supplied by schedulingPlayback.ts instead of overwriting.
+  useEffect(() => {
+    if (!playback) return;
+    const unseen = playback.animationEvents.filter((transition) => !observedEventIdsRef.current.has(transition.eventId));
+    for (const transition of unseen) {
+      observedEventIdsRef.current.add(transition.eventId);
+      if (activeTransitionRef.current) {
+        transitionQueueRef.current.push(transition);
+      } else {
+        activeTransitionRef.current = transition;
+        animationProgressRef.current = 0;
+        setMovingTransition(transition);
+      }
+    }
+    if (unseen.length > 0) setFallbackTransition(null);
+  }, [playback?.animationResetKey, playback?.animationEvents]);
+
+  // Animate independently from playback-time sampling. The rAF loop only
+  // touches the particle's SVG transform and is not restarted by React renders.
+  useEffect(() => {
+    if (!playback || !movingTransition || (!playback.isPlaying && !playback.isAtEnd)) return;
+
+    const transition = movingTransition;
+    const path = activeEdge ? pathRefs.current[activeEdge.action] : null;
+    const particle = particleRef.current;
+    const durationMs = Math.max(350, 450 / playback.playbackSpeed);
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let frame = 0;
+    let startTime: number | null = null;
+    const startingProgress = animationProgressRef.current;
+    const start = (now: number) => now - startingProgress * durationMs;
+
+    let pathLength = 0;
+    if (!reducedMotion && path && particle) {
+      try {
+        pathLength = path.getTotalLength();
+        if (!Number.isFinite(pathLength) || pathLength <= 0) pathLength = 0;
+      } catch {
+        pathLength = 0;
+      }
+    }
+
+    if (reducedMotion || !path || !particle || pathLength === 0) {
+      // This also covers missing/unmounted SVG geometry without silently
+      // snapping: the active edge and explicit source→destination marker stay visible.
+      setFallbackTransition(transition);
+    } else {
+      setFallbackTransition(null);
+      // React reuses this SVG group as queued events advance. Place it at this
+      // event's own path position before the next paint so the previous event's
+      // endpoint cannot flash while the new rAF loop is waiting for its first frame.
+      try {
+        const point = path.getPointAtLength(startingProgress * pathLength);
+        particle.setAttribute("transform", `translate(${point.x} ${point.y})`);
+        particle.style.visibility = "visible";
+      } catch {
+        pathLength = 0;
+        particle.style.visibility = "hidden";
+        setFallbackTransition(transition);
+      }
+    }
+
+    const finish = () => {
+      if (activeTransitionRef.current?.eventId !== transition.eventId) return;
+      animationProgressRef.current = 0;
+      activeTransitionRef.current = null;
+      const next = transitionQueueRef.current.shift() ?? null;
+      if (next) {
+        activeTransitionRef.current = next;
+        setMovingTransition(next);
+        setFallbackTransition(null);
+      } else {
+        setMovingTransition(null);
+        setFallbackTransition(null);
+      }
+    };
+
+    const step = (now: number) => {
+      if (startTime === null) startTime = start(now);
+      const progress = Math.min(1, (now - startTime) / durationMs);
+      animationProgressRef.current = progress;
+
+      if (pathLength > 0 && path && particle) {
+        try {
+          const point = path.getPointAtLength(progress * pathLength);
+          particle.setAttribute("transform", `translate(${point.x} ${point.y})`);
+          particle.style.visibility = "visible";
+        } catch {
+          pathLength = 0;
+          particle.style.visibility = "hidden";
+          setFallbackTransition(transition);
+        }
+      }
+
+      if (progress >= 1) finish();
+      else frame = requestAnimationFrame(step);
+    };
+
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [
+    Boolean(playback),
+    playback?.animationResetKey,
+    playback?.isPlaying,
+    playback?.isAtEnd,
+    playback?.playbackSpeed,
+    movingTransition?.eventId,
+    activeEdge,
+  ]);
+
+  // The main simulator retains its original elapsed-time particle behavior.
+  useEffect(() => {
+    if (playback) return;
     const path = activeEdge ? pathRefs.current[activeEdge.action] : null;
     const particle = particleRef.current;
 
@@ -211,7 +367,10 @@ export function ProcessStateGraph({
       cancelAnimationFrame(frame);
       particle.style.display = "none";
     };
-  }, [activeEdge]);
+  }, [
+    activeEdge,
+    Boolean(playback),
+  ]);
 
   const targetNode = activeEdge
     ? NODE_DEFS.find((node) => node.state === activeEdge.to)
@@ -223,7 +382,7 @@ export function ProcessStateGraph({
         <svg
           viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`}
           preserveAspectRatio="xMidYMid meet"
-          className="h-full w-full"
+          className={`h-full w-full ${playback ? "scheduler-playback-svg" : ""}`}
           role="img"
           aria-label="Process state machine showing NEW, READY, RUNNING, BLOCKED and TERMINATED states and every valid transition"
         >
@@ -233,8 +392,14 @@ export function ProcessStateGraph({
             if (!transition) return null;
 
             const isActive = activeEdge?.action === edge.action;
-            const is_valid =
-              currentState !== null && validActions.includes(edge.action);
+            const animateEdge = isActive && (
+              !playback || movingTransition?.action === edge.action
+            );
+            const is_valid = playback
+              ? edge.action === "BLOCK" || edge.action === "WAKE"
+                ? false
+                : displayProcesses.some((process) => process.state === edge.from)
+              : currentState !== null && validActions.includes(edge.action);
             const sourceColors = getStateSvgColors(transition.from);
 
             const stroke = isActive
@@ -260,14 +425,14 @@ export function ProcessStateGraph({
                   stroke={stroke}
                   strokeWidth={strokeWidth}
                   strokeLinecap="round"
-                  className={isActive ? "state-edge-active" : undefined}
-                  opacity={currentState === null || currentState === transition.from || is_valid || isActive ? 1 : 0.55}
+                  className={animateEdge ? "state-edge-active" : undefined}
+                  opacity={playback ? (edge.action === "BLOCK" || edge.action === "WAKE" ? 0.35 : 1) : currentState === null || currentState === transition.from || is_valid || isActive ? 1 : 0.55}
                   style={{ transition: "stroke 250ms ease, stroke-width 250ms ease, opacity 250ms ease" }}
                 />
                 <polygon
                   points={arrowPolygon(edge.endX, edge.endY, edge.endAngle)}
                   fill={stroke}
-                  opacity={currentState === null || currentState === transition.from || is_valid || isActive ? 1 : 0.55}
+                  opacity={playback ? (edge.action === "BLOCK" || edge.action === "WAKE" ? 0.35 : 1) : currentState === null || currentState === transition.from || is_valid || isActive ? 1 : 0.55}
                   style={{ transition: "fill 250ms ease, opacity 250ms ease" }}
                 />
                 <text
@@ -281,7 +446,7 @@ export function ProcessStateGraph({
                   fill={labelFill}
                   stroke="#f8fafc"
                   strokeWidth={5}
-                  opacity={currentState === null || currentState === transition.from || is_valid || isActive ? 1 : 0.55}
+                  opacity={playback ? (edge.action === "BLOCK" || edge.action === "WAKE" ? 0.35 : 1) : currentState === null || currentState === transition.from || is_valid || isActive ? 1 : 0.55}
                   style={{ paintOrder: "stroke", transition: "fill 250ms ease, opacity 250ms ease" }}
                 >
                   {edge.action}
@@ -291,7 +456,7 @@ export function ProcessStateGraph({
           })}
 
           {/* Destination pulse while a transition is animating */}
-          {targetNode && (
+          {targetNode && (!playback || movingTransition) && (
             <circle
               key={`target-${targetNode.state}`}
               cx={targetNode.x}
@@ -308,8 +473,16 @@ export function ProcessStateGraph({
           {/* State nodes */}
           {NODE_DEFS.map((node) => {
             const colors = getStateSvgColors(node.state);
-            const isCurrent = currentState === node.state;
+            const isCurrent = displayCurrentState === node.state;
             const count = stateCounts[node.state] ?? 0;
+            const tokenBox = node.state === "NEW"
+              ? { x: node.x + 47, y: node.y - 32, width: 190, height: 68 }
+              : node.state === "READY"
+                ? { x: node.x + 47, y: node.y - 48, width: 250, height: 96 }
+                : node.state === "TERMINATED"
+                  ? { x: node.x + 45, y: node.y - 42, width: 92, height: 84 }
+                  : { x: node.x - 58, y: node.y + 9, width: 116, height: 58 };
+            const stateJobs = displayProcesses.filter((process) => process.state === node.state);
 
             return (
               <g key={node.state}>
@@ -330,7 +503,7 @@ export function ProcessStateGraph({
                   fill={colors.fill}
                   stroke={colors.stroke}
                   strokeWidth={2.25}
-                  opacity={currentState === null || isCurrent ? 1 : 0.62}
+                  opacity={playback ? 1 : currentState === null || isCurrent ? 1 : 0.62}
                   style={{ transition: "opacity 250ms ease" }}
                 />
                 <text
@@ -346,6 +519,21 @@ export function ProcessStateGraph({
                   <title>{node.state}</title>
                   {node.state}
                 </text>
+                {playback && stateJobs.length > 0 && (
+                  <foreignObject {...tokenBox}>
+                    <div className="flex max-h-full flex-wrap content-start justify-center gap-1 overflow-y-auto text-sm leading-6">
+                      {stateJobs.map((process) => (
+                        <span
+                          key={process.job_id}
+                          title={`${process.name} (${process.job_id})`}
+                          className={`scheduling-job-token rounded px-2.5 py-0.5 font-mono font-bold shadow-sm ${process.job_id === movingTransition?.jobId ? "is-moving" : ""} ${process.job_id === playback.runningJobId ? "bg-amber-600 text-white ring-2 ring-amber-200" : "bg-white/95 text-slate-800"}`}
+                        >
+                          {process.job_id}
+                        </span>
+                      ))}
+                    </div>
+                  </foreignObject>
+                )}
                 {count > 0 && (
                   <g>
                     <circle
@@ -374,21 +562,38 @@ export function ProcessStateGraph({
             );
           })}
 
-          {/* Particle / data flow along the active edge */}
-          <g ref={particleRef} style={{ display: "none", pointerEvents: "none" }}>
-            <circle r={18} fill="var(--color-primary, #d97706)" opacity={0.3} />
-            <circle
-              r={8}
-              fill="var(--color-primary, #d97706)"
-              stroke="#fff"
-              strokeWidth={2}
-            />
-          </g>
+          {/* This independent SVG token stays mounted for the whole animation. */}
+          {playback && movingTransition && !fallbackTransition && (
+            <g
+              ref={particleRef}
+              className="scheduling-transition-token"
+              style={{ visibility: "hidden", pointerEvents: "none" }}
+            >
+              <circle r={22} fill="var(--color-primary, #d97706)" opacity={0.4} />
+              <circle r={14} fill="var(--color-primary, #d97706)" stroke="#fff" strokeWidth={2.5} />
+              <text x={16} y={-12} fontSize={12} fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontWeight={800} fill="#172033" stroke="#fff" strokeWidth={4} paintOrder="stroke">
+                {movingTransition.jobId}
+              </text>
+            </g>
+          )}
+          {playback && fallbackTransition && (
+            <text x={380} y={410} textAnchor="middle" fontSize={13} fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontWeight={800} fill="#172033" stroke="#fff" strokeWidth={5} paintOrder="stroke">
+              {fallbackTransition.jobId}: {fallbackTransition.from} → {fallbackTransition.to}
+            </text>
+          )}
+          {!playback && (
+            <g ref={particleRef} style={{ display: "none", pointerEvents: "none" }}>
+              <circle r={18} fill="var(--color-primary, #d97706)" opacity={0.3} />
+              <circle r={8} fill="var(--color-primary, #d97706)" stroke="#fff" strokeWidth={2} />
+            </g>
+          )}
         </svg>
       </div>
 
       <footer className="ui-meta mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-base-300 pt-2">
-        {selectedProcess ? (
+        {playback ? (
+          <span>Scheduling jobs are shown by job ID. BLOCKED and WAKE are inactive because this schedule has no I/O events.</span>
+        ) : selectedProcess ? (
           <span>
             Selected process{" "}
             <span className="ui-value font-mono">

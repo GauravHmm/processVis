@@ -53,9 +53,9 @@ scheduling engine computes over integer *simulation time units*, not real elapse
 | Hierarchy | Parent/child links, process tree view, parent and children lookups |
 | Observability | Timestamped event log of creation, transitions, rejections, reset |
 | Reset | Clears processes, hierarchy, events, and restarts PID generation at 1 |
-| CPU scheduling | FCFS, non-preemptive SJF, non-preemptive Priority, Round Robin; single run or four-way comparison with Gantt timeline and averages |
+| CPU scheduling | FCFS, non-preemptive SJF, non-preemptive Priority, Round Robin; single run or four-way comparison with synchronized lifecycle playback, Gantt timeline, and averages |
 | Interfaces | Next.js web UI over REST; Tkinter desktop UI over the same in-process controller |
-| Quality | 147 pytest tests; `pnpm lint` (TypeScript type check with unused-code checks); production build |
+| Quality | 147 pytest tests; `pnpm lint` (TypeScript type check with unused-code checks); production build; current API test-client environment limitation in [TESTING.md](TESTING.md) |
 
 ### 1.4 Current limitations and future scope
 
@@ -807,7 +807,7 @@ Navigation is entirely component-level, using daisyUI tabs:
 | `ProcessTable` | Tabular process list with row selection |
 | `EventLog` | Timestamped event list with empty/loading/error states and a retry button |
 | `ProcessCreationForm` | Name / priority / optional parent form → `POST /api/processes` |
-| `CpuSchedulingWorkspace` | Job table, algorithm + quantum controls, run/compare actions, Gantt timeline, metrics table |
+| `CpuSchedulingWorkspace` | Job table, algorithm + quantum controls, run/compare actions, playback clock/events/controls, Gantt timeline, metrics table |
 
 Four earlier components (`PCBViewer`, `Panel`, `StateMachine`, `StateVisualizer`) were
 removed: nothing imported them, and their roles are covered by `ProcessInspector`,
@@ -837,6 +837,9 @@ removed: nothing imported them, and their roles are covered by `ProcessInspector
 - `lib/processState.ts` is presentation-only: state colours/badges, SVG palette, the static
   `ACTION_TRANSITIONS` map, and helpers such as `isValidTransition`. Comment and code both
   enforce that *allowability* comes from the backend, not from this file.
+- `lib/schedulingPlayback.ts` derives lifecycle events from the immutable backend result,
+  finds clock-crossed events, and reconstructs a complete state snapshot at any selected
+  time. It does not call simulator mutation endpoints.
 
 ### 6.4 Visualizations
 
@@ -848,14 +851,44 @@ removed: nothing imported them, and their roles are covered by `ProcessInspector
   current state are emphasised, invalid ones dimmed (opacity 0.55).
 - Selected state gets a glow ring; each node shows a badge with the number of processes
   currently in that state.
-- While an action executes, `pendingAction` drives a `requestAnimationFrame` particle that
-  travels along the edge (1200 ms) plus a pulsing ring on the destination node; CSS
-  animations are disabled under `prefers-reduced-motion`.
+- In the Process Simulator, `pendingAction` drives its existing transition particle and
+  destination pulse. In scheduling playback, the same SVG paths/nodes are reused, but job
+  labels come from the scheduler snapshot and a separate, readable job token travels on
+  the path for the active event. The scheduler token is rendered above nodes and follows
+  the SVG path geometry (`getPointAtLength`); BLOCK and WAKE remain visible but muted.
+
+**Scheduling playback (`CpuSchedulingWorkspace` + `schedulingPlayback.ts`)** — the API's
+`timeline` and per-job completion metrics are the only schedule source. The frontend derives
+ADMIT events from arrival times, DISPATCH events from execution starts, and either PREEMPT
+or TERMINATE at each execution interval's end. An interval ending at that job's
+`completion_time` is TERMINATE, including exact Round Robin quantum completion. Events at
+the same time have stable phases: arrivals/admissions precede an unfinished Round Robin
+slice being requeued, and dispatch follows those queue events. Other algorithms retain the
+backend interval order and do not produce preemptions.
+
+Snapshots are reconstructed from all events with `event.time <= selectedTime` (right
+continuous boundaries); execution intervals are half-open, and the final timestamp has no
+active Gantt segment. CPU idle intervals remain idle in the diagram. Seeking and rewinding
+replace the selected time and rebuild this snapshot; no state is reversed by mutation.
+Clock-crossed events are kept in a separate animation queue. The SVG token uses a wall-clock
+`requestAnimationFrame` loop independent of clock sampling. Simultaneous transitions are
+serialized in event order. Pause cancels the frame while retaining progress; resume continues
+from the saved progress. Seek/restart/result changes clear active and queued animations.
+The nominal animation duration is 450 ms adjusted by playback speed, with a 350 ms minimum.
+With `prefers-reduced-motion`, or if SVG geometry cannot be read, the view shows a static
+source-to-destination transition indicator and edge highlight. Playback speed is selected
+from 0.5×, 1×, 2×, and 4×.
+
+The scheduler currently has no I/O event input. Therefore it never derives BLOCK or WAKE;
+those existing diagram transitions are shown as inactive. Scheduling jobs have IDs and
+presentation states only: they are not PCB objects and cannot mutate simulator processes or
+the simulator event log.
 
 **Gantt timeline (`CpuSchedulingWorkspace`)** — proportional-width flex segments, idle
-segments greyed, axis label showing total time units, plus a metrics table
-(arrival, burst, first start, completion, waiting, turnaround, response) and three average
-cards.
+segments greyed, a playhead and active segment driven by the same playback clock, axis
+labels, plus full-schedule metrics (arrival, burst, first start, completion, waiting,
+turnaround, response) and three average cards. Metrics do not become partial when playback
+is paused.
 
 ### 6.5 Configuration and styling
 
@@ -889,9 +922,9 @@ Tailwind CSS 4.3.3, daisyUI 5.7.47, pnpm 12.4.2.
 
 | Requirement | Notes |
 |---|---|
-| Python 3.12+ | Verified with Python 3.12.3 |
+| Python 3.10+ | Uses modern type-union syntax; verified with Python 3.12.3 |
 | `venv` + `pip` | Standard CPython distribution |
-| Node.js 18+ | Verified with Node 24.18.0 |
+| Node.js 20.9+ | Required by the installed Next.js 16 package; verified with Node 24.18.0 |
 | pnpm 12 | Declared in `package.json` (`"packageManager": "pnpm@12.4.2"`); verified with pnpm 12.4.2 |
 | Graphical display | Only for the Tkinter app (`python main.py`) |
 | Free ports | 8000 (backend), 3000 (frontend) |
@@ -949,7 +982,7 @@ reads no environment variables of its own; CORS origins are hard-coded in `api/m
 
 ```bash
 # backend (from the repository root, with the venv active)
-python -m pytest tests/ -v          # 147 tests
+python -m pytest tests/ -v          # 147 collected; see TESTING.md for current API-test hang
 
 # frontend
 cd frontend
@@ -992,30 +1025,29 @@ root):
 | `test_scheduling.py` | 10 | FCFS with idle gap and metrics, FCFS input-order tie, SJF selection + tie, Priority order + convention, Round Robin slicing with mid-slice arrival, RR idle start, four invalid-input cases |
 | `test_api.py` | 45 | Health/root, creation (root/child/unique/400/422), scheduling run + compare + 422 cases, retrieval, hierarchy endpoints, valid-actions per state, all six transition endpoints, rejections, event log, reset (state + PID counter), full lifecycle |
 
-Not covered by automated tests: the Tkinter GUI, the React components (no frontend test
-runner), visual rendering, CORS behaviour, and the `pnpm build` output (verified manually).
+Not covered by automated tests: the Tkinter GUI, React components (no frontend test runner),
+and visual rendering. `pnpm build` is an executed production-build check, not a browser test.
 
 ### 8.2 Known issues
 
 Remaining:
 
-1. **API test hang (previously reported)** — a hang in `tests/test_api.py` was reported
-   earlier in the project. It is **not reproducible in the current environment**: on 13 and
-   14 Oct 2026 the module completed its 45 tests in well under a second and the full suite
-   completed 147 tests in ~1.3 s (see [TESTING.md](TESTING.md)). If it recurs, run the
-   module alone under a shell timeout
-   (`timeout 120 python -m pytest tests/test_api.py -v`) to confirm, then check the
-   starlette/httpx versions — the suite currently emits
-   `StarletteDeprecationWarning: Using httpx with starlette.testclient is deprecated;
-   install httpx2 instead`, and running with `-W error::DeprecationWarning` turns the anyio
-   deprecation warning into a **collection error** in `test_api.py`. Residual risk:
-   unresolved until a scenario that reproduces the hang is identified.
-2. **Deprecation warnings during pytest** — the two warnings originate from the installed
-   starlette/httpx/anyio stack, not from project code.
+1. **Synchronous API test hang in this audit environment** — `timeout 25s venv/bin/python
+   -m pytest tests/test_api.py -x -q` stalls on `TestAPIHealth.test_health_check`. A timed
+   faulthandler dump shows the test thread waiting in `TestClient`/AnyIO's blocking portal
+   while the portal thread is idle in the asyncio selector; the health handler is not
+   reached. `api/main.py` has no lifespan or startup hooks. An `httpx.AsyncClient` with
+   `ASGITransport` successfully verified health, scheduling, comparison, and simulator
+   isolation. The current installed stack is FastAPI 0.141.1, Starlette 1.6.0, httpx 0.28.1,
+   AnyIO 4.15.1; the exact compatibility/environment trigger is unresolved. Do not interpret
+   the async smoke as the 45 synchronous API tests passing.
+2. **Test-client deprecation warnings** — collection reports Starlette's httpx/TestClient
+   deprecation and AnyIO's deprecated `BlockingPortal` alias.
 3. **No lint/type gate in CI** — checks are manual (`pnpm lint`, `pytest`, `pnpm build`);
    the project has no CI configuration.
-4. **No frontend or GUI automated tests** — React components and the Tkinter app are
-   verified by hand.
+4. **No frontend or GUI automated tests** — React components and Tkinter are not covered by
+   automated tests. No browser was available in the final audit, so continuous scheduling
+   token motion remains a manual acceptance check.
 
 Resolved in the documentation/cleanup pass (kept here so the history is visible):
 

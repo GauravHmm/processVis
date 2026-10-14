@@ -44,105 +44,55 @@ python -m pytest tests/ -v
 ### What is *not* covered
 
 - `gui/` Tkinter modules (dashboard, state canvas, PCB viewer, table, tree, theme,
-  animation) — verified manually (see §4.5).
+  animation) — no GUI verification was run in this final audit.
 - React/TypeScript components and `lib/` helpers — no frontend test framework exists.
 - CORS behaviour, `/openapi.json` shape, and HTTP behaviour under concurrency.
 - Frontend behaviour (health badge polling, rejection-message rendering, error
-  normalisation) — verified by `pnpm lint` (type checking) and by hand, not by automated
-  component tests.
+  normalisation, scheduling animation) — no frontend component/browser test runner exists;
+  type-checking/build do not verify rendered motion.
 
 ---
 
 ## 3. Commands executed and verified results
 
-All commands were run on the working tree on **14 Oct 2026** (Python 3.12.3, pytest 8.4.2,
-Node 24.18.0, pnpm 12.4.2), after the cleanup/documentation pass described in
-[TECHNICAL_DOCUMENTATION.md §8.2](TECHNICAL_DOCUMENTATION.md).
+Final audit run on **14 Oct 2026** in the repository environment (Python 3.12.3, pytest
+8.4.2, Node 24.18.0, pnpm 12.4.2). Results below describe this run, not historical runs.
 
-### 3.1 Backend — full suite
+### 3.1 Backend
 
-```bash
-venv/bin/python -m pytest tests/ -v
-```
-
-```
-=============================== warnings summary ========================
-.../fastapi/testclient.py:1 StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
-.../starlette/testclient.py:53 DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
-======================= 147 passed, 2 warnings in 1.93s ========================
-```
-
-No failures, no skips, no errors. The two warnings originate from the installed
-starlette/httpx/anyio stack (see §5.1).
-
-### 3.2 Backend — per-file runs
-
-| Command | Result |
+| Command | Actual result |
 |---|---|
-| `venv/bin/python -m pytest tests/test_api.py -q` | `45 passed, 2 warnings in 1.50s` |
-| `venv/bin/python -m pytest tests/test_controller.py -q` | `22 passed in 0.05s` |
-| `venv/bin/python -m pytest tests/test_hierarchy.py -q` | `28 passed in 0.03s` |
-| `venv/bin/python -m pytest tests/test_process.py -q` | `11 passed in 0.03s` |
-| `venv/bin/python -m pytest tests/test_process_manager.py -q` | `9 passed in 0.03s` |
-| `venv/bin/python -m pytest tests/test_scheduling.py -q` | `10 passed in 0.05s` |
-| `venv/bin/python -m pytest tests/test_state_manager.py -q` | `22 passed in 0.05s` |
-| `venv/bin/python -m pytest tests/ --collect-only -q` | `147 tests collected in 0.78s` |
+| `venv/bin/python -m pytest tests/ --collect-only -q` | 147 tests collected in 0.30 s; two Starlette/AnyIO deprecation warnings |
+| `venv/bin/python -m pytest tests/test_process.py tests/test_process_manager.py tests/test_state_manager.py tests/test_controller.py tests/test_hierarchy.py tests/test_scheduling.py -q` | **102 passed in 0.07 s** |
+| `venv/bin/python -m pytest tests/test_scheduling.py -q` | **10 passed in 0.01 s** |
+| `timeout 25s venv/bin/python -m pytest tests/test_api.py -x -q` | timed out, exit 124, on the first health test |
+| `timeout 25s venv/bin/python -m pytest tests/ -q` | timed out, exit 124, before completion; API health test is first |
+| Timed faulthandler run of the first API test | confirmed the test thread waits in Starlette `TestClient`/AnyIO portal; portal thread sits in asyncio selector; app endpoint is not reached |
 
-Each file ran standalone under a 60 s shell timeout and completed in well under two
-seconds — in particular `tests/test_api.py`, the module historically reported as hanging
-(see §5.1).
+An async `httpx.AsyncClient` using `ASGITransport(app=app)` successfully checked health,
+Round Robin schedule intervals, comparison results for all four algorithms, and that a
+scheduling request leaves an existing process in `NEW`. This smoke check is **not** the
+45-test synchronous API suite and is not reported as such. See §5.1.
 
-### 3.3 Backend — compilation and imports
+### 3.2 Frontend and repository checks
 
-```bash
-venv/bin/python -m compileall -q api core process gui scheduling tests main.py   # exit 0
-venv/bin/python -c "import api.main, core.controller, scheduling.engine"          # imports OK
-```
-
-### 3.4 Frontend — type check, lint, build
-
-| Command | Result |
+| Command | Actual result |
 |---|---|
-| `cd frontend && pnpm lint` (`tsc --noEmit` + `noUnusedLocals`/`noUnusedParameters`) | exit code **0**, no diagnostics |
-| `cd frontend && pnpm exec tsc --noEmit` | exit code **0**, no diagnostics |
-| `cd frontend && pnpm build` | exit code **0**: Next.js 16.3.5 (Turbopack), `✓ Compiled successfully`, `Running TypeScript … Finished`, `Generating static pages … (3/3)`, routes `/` and `/_not-found`; emitted CSS is byte-identical to the pre-cleanup build |
+| `cd frontend && pnpm lint` | passed, exit 0 (`tsc --noEmit`, no diagnostics) |
+| `cd frontend && pnpm build` inside the sandbox | failed because Next could not spawn Node for TypeScript (`EPERM`, empty captured `--showConfig`) |
+| `cd frontend && pnpm build` with approved subprocess permissions | passed: Next.js 16.3.5 compiled, type checked, generated 3 static pages, routes `/` and `/_not-found` |
+| Direct Node smoke of `schedulingPlayback.ts` | passed: RR boundary order (`ADMIT`, `PREEMPT`, `DISPATCH`), exact-quantum termination, seek suppression, and final terminated snapshot; this is not an SVG/browser test |
+| `git diff --check` | run at the end of the documentation/source review; see final report for status |
 
-`pnpm lint` is the type gate (it is `tsc --noEmit` with unused-locals/parameters checks —
-see [TECHNICAL_DOCUMENTATION.md §6.5](TECHNICAL_DOCUMENTATION.md)). It passes with exit
-code 0; there is no separate ESLint configuration in this project.
+The first build failure was a sandbox subprocess restriction, not a TypeScript diagnostic;
+the same documented build completed once subprocess execution was allowed. `pnpm lint` is
+the type gate; the repository has no separate ESLint script/configuration.
 
-### 3.5 Backend — live API smoke test
+### 3.3 Browser verification
 
-Started `venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000` and exercised the API
-with `curl`:
-
-| Request | Verified response |
-|---|---|
-| `GET /api/health` | `200 {"status":"ok"}` |
-| `POST /api/reset` | `200 {"success":true,"message":"Simulation reset"}` |
-| `POST /api/processes` `{"name":"Shell","priority":5}` | `201` full `PCBResponse`, `parent_pid: null`, `children: []` |
-| `POST /api/processes` `{"name":"S","parent_pid":1}` | `201`, `parent_pid: 1` |
-| `POST /api/processes/1/dispatch` (process in NEW) | `200 {"success":false,…,"message":"DISPATCH requires state READY, but P1 is NEW; valid actions now: ADMIT"}` |
-| `POST /api/processes` with `{"name":""}` | `422` list-shaped `detail` (`string_too_short`, `loc:["body","name"]`) |
-| `POST /api/processes` with `{"name":"x","priority":200}` | `422` list-shaped `detail` (`less_than_equal`, `loc:["body","priority"]`) |
-| `GET /api/events` | includes `P1 (Shell) REJECTED: DISPATCH requires state READY, but P1 is NEW; valid actions now: ADMIT` |
-| `POST /api/scheduling/run` (Round Robin, quantum 2) | full metrics/timeline, `priority_convention` string present |
-| `POST /api/scheduling/run` (Round Robin without quantum) | `422` list-shaped `detail` (`value_error`, `loc:["body"]`) |
-| `POST /api/scheduling/compare` | `200` with all four algorithms |
-| `GET /openapi.json` (`POST /api/processes` responses) | codes `201/400/422`; `422` now references `HTTPValidationError` (list-shaped `detail`), `400` references `ErrorResponse` (string `detail`) |
-| `OPTIONS` preflight from `http://localhost:3000` | `200` |
-| `OPTIONS` preflight from `http://evil.example` | `400` |
-
-The server was shut down after the smoke test.
-
-### 3.6 Evidence for the dead-code and config findings
-
-| Finding | Method | Result |
-|---|---|---|
-| `frontend/tailwind.config.ts` is unused | removed the file, rebuilt, compared the emitted CSS hash to the pre-change build | CSS **byte-identical** → file removed |
-| `autoprefixer` in `postcss.config.mjs` is required | temporarily removed it, rebuilt, compared CSS | CSS **changed** → dependency kept |
-| `PCBViewer`, `Panel`, `StateMachine`, `StateVisualizer` unused | searched all `.ts`/`.tsx` imports | no references → files removed |
-| `api.getProcess`/`getParent`/`getChildren` unused | searched all `.ts`/`.tsx` call sites | no calls → helpers removed (`healthCheck` now used by `Header`) |
+No Chromium/Chrome executable or installed Playwright package was found. The lifecycle
+token was **not** visually verified in this audit. Use the manual procedure in §4.5 before
+demonstrating continuous motion.
 
 ---
 
@@ -189,6 +139,23 @@ source venv/bin/activate && uvicorn api.main:app --reload --port 8000
 cd frontend && pnpm dev     # http://localhost:3000
 ```
 
+For scheduling playback in the browser:
+
+1. Open **CPU Scheduling**, run FCFS, SJF, Priority, and Round Robin, then compare all four
+   on the same job list. Switch comparison tabs and confirm each result starts at time zero.
+2. Use a Round Robin quantum smaller than at least one burst. At 1×, watch an unfinished
+   job travel along RUNNING → READY before it is dispatched again.
+3. Include a burst exactly divisible by the quantum. Its final interval must animate
+   RUNNING → TERMINATED, with no final PREEMPT. Also check an arrival at a quantum boundary
+   and a CPU idle interval before the first arrival.
+4. Pause during motion, resume, seek forward/backward, restart, and change speed. Confirm the
+   diagram labels, Gantt playhead/highlight, event explanation, and clock agree; seeking must
+   not replay past transitions.
+5. Create/transition a process in the Process Simulator before and after playback. Verify
+   scheduler playback does not alter its row or event log.
+6. Enable reduced motion and confirm edge highlighting plus the static transition indicator
+   remain clear.
+
 The Tkinter `Dashboard` was instantiated headlessly in this environment (create a process,
 read it back, destroy the window) and ran successfully, confirming the desktop entry point
 works; it has no automated test coverage.
@@ -197,37 +164,65 @@ works; it has no automated test coverage.
 
 ## 5. Known issues and caveats
 
-### 5.1 API test hang (previously reported) — not reproducible
+### 5.1 Synchronous API test hang
 
-A hang affecting `tests/test_api.py` was reported earlier in the project. Verification on
-14 Oct 2026 found **no hang**:
+The hang reproduces in the final audit environment. The targeted health test and full test
+suite both time out on their first API request. A timed faulthandler trace showed the test
+thread waiting in `concurrent.futures.Future.result()` through AnyIO
+`run_sync_from_thread` and Starlette `TestClient.handle_request`, while the portal thread
+waits in the asyncio selector. The call stack remains at
+`tests/test_api.py::TestAPIHealth::test_health_check`; the endpoint is not reached.
 
-- `venv/bin/python -m pytest tests/test_api.py -q` → `45 passed … in 1.50 s`
-- `venv/bin/python -m pytest tests/ -q` → `147 passed … in 1.93 s` (repeated runs)
-- The reported hang does not reproduce on this checkout; triage below kept for reference.
+`api/main.py` has no lifespan handler, startup hook, background task, or network request.
+The installed stack is FastAPI 0.141.1, Starlette 1.6.0, httpx 0.28.1, and AnyIO 4.15.1.
+Collection also emits deprecation warnings for Starlette's httpx/TestClient integration and
+AnyIO's `BlockingPortal` alias. The exact compatibility or environment trigger is unresolved;
+no speculative API or startup changes were made.
 
-Relevant risk factors if it reappears (all observed, none currently causing failures):
+The established alternative is an `httpx.AsyncClient` with
+`httpx.ASGITransport(app=app)`. During this audit it verified `/api/health`, a Round Robin
+schedule, comparison results for all four algorithms, and that scheduling left an existing
+simulated process in `NEW`. This targeted smoke check is useful API evidence, but **does not
+replace or count as passing** the 45 synchronous API tests.
 
-1. **Client/stack skew.** The suite emits
-   `StarletteDeprecationWarning: Using httpx with starlette.testclient is deprecated;
-   install httpx2 instead` and a DeprecationWarning about the anyio `BlockingPortal` alias.
-   The `TestClient` runs the ASGI app through an anyio blocking portal; a mismatch between
-   `starlette` (1.6.0), `httpx` (0.28.1), and `anyio` (4.15.1) is the most plausible cause
-   of a blocked portal (a hang rather than an error).
-2. **Strict warning filters break collection.**
-   `python -m pytest tests/ -q -W error::DeprecationWarning` fails during collection of
-   `tests/test_api.py` with `DeprecationWarning: The anyio.abc.BlockingPortal alias is
-   deprecated …` — i.e. anyone adding `filterwarnings = error` (or running with that flag)
-   will see `test_api.py` fail at import time. This is the closest observed relative of the
-   reported "hang" and remains unresolved.
-3. **Module-level `TestClient(app)`** in `tests/test_api.py` is constructed at import; if
-   the environment ever changes to run the lifespan on import, that is where a stall would
-   occur.
+The same in-process check can be repeated without starting a server:
 
-Recommended triage if the hang returns: run the module alone under a shell timeout to
-confirm (`timeout 120 python -m pytest tests/test_api.py -v`), then compare installed
-`starlette`/`httpx`/`anyio` versions against `requirements.txt`. No project source change is
-required to reproduce the current passing behaviour.
+```bash
+venv/bin/python - <<'PY'
+import asyncio
+import httpx
+from api.main import app
+from api.routes import reset_controller
+
+async def main():
+    reset_controller()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        assert (await client.get("/api/health")).json() == {"status": "ok"}
+        await client.post("/api/processes", json={"name": "Existing"})
+        response = await client.post("/api/scheduling/run", json={
+            "algorithm": "ROUND_ROBIN", "time_quantum": 2,
+            "jobs": [
+                {"job_id": "a", "name": "A", "arrival_time": 0,
+                 "burst_time": 3, "priority": 5},
+                {"job_id": "b", "name": "B", "arrival_time": 1,
+                 "burst_time": 1, "priority": 9},
+            ],
+        })
+        assert response.status_code == 200
+        state = await client.get("/api/processes/1")
+        assert state.json()["state"] == "NEW"
+
+asyncio.run(main())
+PY
+```
+
+To retest after the environment changes, use a bounded command:
+
+```bash
+timeout 25s venv/bin/python -m pytest tests/test_api.py -x -q
+```
 
 ### 5.2 `pnpm lint` — now functional
 
@@ -245,7 +240,8 @@ Two warnings are produced by installed dependencies, not by project code:
 - `DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated …` (from
   `starlette/testclient.py`).
 
-They do not affect results but make `-W error::DeprecationWarning` unusable (§5.1).
+The precise hang cause remains unresolved (§5.1); these warnings alone do not establish its
+cause.
 
 ### 5.4 Behavioural assertions worth knowing when writing tests
 

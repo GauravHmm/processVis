@@ -70,10 +70,14 @@
 
 .state-edge-active { animation: state-edge-active 900ms ease-in-out infinite; }
 .node-target-pulse { animation: node-target-pulse 900ms ease-in-out infinite; transform-box: fill-box; }
+.scheduling-transition-token { filter: drop-shadow(0 2px 3px rgb(15 23 42 / 55%)); }
+.scheduler-playback-svg .scheduling-job-token.is-moving { visibility: hidden; }
 
 @media (prefers-reduced-motion: reduce) {
   .state-edge-active,
   .node-target-pulse { animation: none; }
+  .scheduling-transition-token { display: none !important; }
+  .scheduler-playback-svg .scheduling-job-token.is-moving { visibility: visible; }
 }
 
 button:focus-visible,

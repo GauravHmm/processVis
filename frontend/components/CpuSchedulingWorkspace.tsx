@@ -1,7 +1,15 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/api";
+import { ProcessStateGraph } from "@/components/ProcessStateGraph";
+import {
+  derivePlaybackEvents,
+  getPlaybackEventTimes,
+  getPlaybackSnapshot,
+  getPlaybackTransitionsBetween,
+  getPlaybackTotalTime,
+} from "@/lib/schedulingPlayback";
 import type {
   SchedulingAlgorithm,
   SchedulingComparisonResponse,
@@ -60,13 +68,81 @@ export function CpuSchedulingWorkspace() {
   const [comparisonAlgorithm, setComparisonAlgorithm] = useState<SchedulingAlgorithm>("FCFS");
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [playbackTime, setPlaybackTime] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [animationResetKey, setAnimationResetKey] = useState(0);
+  const [animationEvents, setAnimationEvents] = useState<ReturnType<typeof getPlaybackTransitionsBetween>>([]);
+  const playbackTimeRef = useRef(0);
+  const hasStartedTimelineRef = useRef(false);
 
   const jobs = useMemo(() => toJobInputs(drafts), [drafts]);
   const quantum = Number(timeQuantum);
   const validQuantum = Number.isInteger(quantum) && quantum > 0;
   const activeResult = comparison?.results[comparisonAlgorithm] ?? result;
+  const playbackEvents = useMemo(() => activeResult ? derivePlaybackEvents(activeResult) : [], [activeResult]);
+  const eventTimes = useMemo(() => getPlaybackEventTimes(playbackEvents), [playbackEvents]);
+  const totalTime = activeResult ? getPlaybackTotalTime(activeResult) : 0;
+  const playbackSnapshot = activeResult
+    ? getPlaybackSnapshot(activeResult, playbackEvents, playbackTime)
+    : null;
+  const seekTo = (time: number, replayFromStart = false) => {
+    const nextTime = Math.max(0, Math.min(totalTime, time));
+    hasStartedTimelineRef.current = !replayFromStart;
+    setAnimationEvents([]);
+    setAnimationResetKey((key) => key + 1);
+    playbackTimeRef.current = nextTime;
+    setPlaybackTime(nextTime);
+  };
+
+  useEffect(() => {
+    playbackTimeRef.current = playbackTime;
+  }, [playbackTime]);
+
+  useEffect(() => {
+    setIsPlaying(false);
+    hasStartedTimelineRef.current = false;
+    setAnimationEvents([]);
+    setAnimationResetKey((key) => key + 1);
+    playbackTimeRef.current = 0;
+    setPlaybackTime(0);
+  }, [activeResult]);
+
+  useEffect(() => {
+    if (!isPlaying || totalTime <= 0) return;
+    let frame = 0;
+    let previousFrame: number | null = null;
+    const advance = (now: number) => {
+      if (previousFrame === null) previousFrame = now;
+      const elapsedSeconds = (now - previousFrame) / 1000;
+      previousFrame = now;
+      const nextTime = playbackTimeRef.current + elapsedSeconds * playbackSpeed;
+      const previousTime = playbackTimeRef.current;
+      const crossed = getPlaybackTransitionsBetween(
+        playbackEvents,
+        previousTime,
+        Math.min(nextTime, totalTime),
+        !hasStartedTimelineRef.current && previousTime === 0,
+      );
+      if (crossed.length > 0) setAnimationEvents((current) => [...current, ...crossed]);
+      hasStartedTimelineRef.current = true;
+      if (nextTime >= totalTime) {
+        playbackTimeRef.current = totalTime;
+        setPlaybackTime(totalTime);
+        setIsPlaying(false);
+        return;
+      }
+      playbackTimeRef.current = nextTime;
+      setPlaybackTime(nextTime);
+      frame = requestAnimationFrame(advance);
+    };
+    frame = requestAnimationFrame(advance);
+    return () => cancelAnimationFrame(frame);
+  }, [isPlaying, playbackSpeed, totalTime, playbackEvents]);
 
   const updateDraft = (index: number, key: keyof JobDraft, value: string) => {
+    setIsPlaying(false);
+    seekTo(0);
     setDrafts((current) => current.map((draft, currentIndex) =>
       currentIndex === index ? { ...draft, [key]: value } : draft));
     setError(null);
@@ -75,6 +151,8 @@ export function CpuSchedulingWorkspace() {
   };
 
   const addJob = () => {
+    setIsPlaying(false);
+    seekTo(0);
     const jobNumber = nextJobNumber.current++;
     const id = `job-${jobNumber}`;
     setDrafts((current) => [...current, { job_id: id, name: `Process ${jobNumber}`, arrival_time: "0", burst_time: "1", priority: "50" }]);
@@ -84,6 +162,8 @@ export function CpuSchedulingWorkspace() {
   };
 
   const removeJob = (index: number) => {
+    setIsPlaying(false);
+    seekTo(0);
     setDrafts((current) => current.filter((_, currentIndex) => currentIndex !== index));
     setError(null);
     setResult(null);
@@ -100,6 +180,8 @@ export function CpuSchedulingWorkspace() {
       return;
     }
     setIsRunning(true);
+    setIsPlaying(false);
+    seekTo(0);
     setError(null);
     setComparison(null);
     try {
@@ -126,6 +208,8 @@ export function CpuSchedulingWorkspace() {
       return;
     }
     setIsRunning(true);
+    setIsPlaying(false);
+    seekTo(0);
     setError(null);
     try {
       const response = await api.compareScheduling({ jobs, time_quantum: quantum });
@@ -139,27 +223,42 @@ export function CpuSchedulingWorkspace() {
   };
 
   const appendBlankTimeline = (schedule: SchedulingResult) => {
-    const totalTime = schedule.timeline.at(-1)?.end_time ?? 1;
+    const timelineTotal = getPlaybackTotalTime(schedule) || 1;
+    const currentSegment = playbackSnapshot?.segment;
+    const timelineWidth = Math.max(700, Math.min(2400, timelineTotal * 30));
     return (
       <div className="overflow-x-auto pb-2" aria-label={`${schedule.algorithm} execution timeline`}>
-        <div className="flex min-w-[560px] overflow-hidden rounded-lg border border-base-300">
-          {schedule.timeline.map((segment, index) => {
-            const width = `${(segment.duration / totalTime) * 100}%`;
-            return (
-              <div
-                key={`${segment.job_id ?? "idle"}-${segment.start_time}-${index}`}
-                title={`${segment.name}: ${segment.start_time}–${segment.end_time} (${segment.duration} units)`}
-                className={`flex min-w-[4rem] flex-col justify-center border-r border-base-100 px-2 py-2 text-center last:border-r-0 ${segment.job_id === null ? "bg-base-300 text-base-content/70" : "bg-primary/15 text-base-content"}`}
-                style={{ width, flex: `0 0 ${width}` }}
-              >
-                <span className="truncate text-xs font-semibold">{segment.name}</span>
-                <span className="font-mono text-[0.7rem]">{segment.start_time}–{segment.end_time}</span>
-              </div>
-            );
-          })}
-        </div>
-        <div className="mt-1 flex justify-between font-mono text-xs text-base-content/60">
-          <span>0</span><span>{totalTime} time units</span>
+        <div style={{ width: `${timelineWidth}px` }}>
+          <div className="relative overflow-hidden rounded-lg border border-base-300">
+            <div className="flex">
+              {schedule.timeline.map((segment, index) => {
+                const width = `${(segment.duration / timelineTotal) * 100}%`;
+                const isCurrent = currentSegment === segment && playbackTime < totalTime;
+                return (
+                  <div
+                    key={`${segment.job_id ?? "idle"}-${segment.start_time}-${index}`}
+                    title={`${segment.name}: ${segment.start_time}–${segment.end_time} (${segment.duration} units)`}
+                    className={`flex min-h-14 min-w-0 flex-col justify-center border-r border-base-100 px-2 py-2 text-center last:border-r-0 ${segment.job_id === null ? "bg-base-300 text-base-content/70" : isCurrent ? "bg-primary/35 text-base-content ring-2 ring-inset ring-primary" : "bg-primary/15 text-base-content"}`}
+                    style={{ width, flex: `0 0 ${width}` }}
+                  >
+                    <span className="truncate text-xs font-semibold">{segment.name}</span>
+                    <span className="truncate font-mono text-[0.7rem]">{segment.start_time}–{segment.end_time}</span>
+                  </div>
+                );
+              })}
+            </div>
+            {activeResult && playbackTime <= totalTime && (
+              <div aria-hidden="true" className="pointer-events-none absolute bottom-0 top-0 z-10 w-0.5 bg-error shadow-[0_0_5px_rgba(0,0,0,0.35)]" style={{ left: `${(playbackTime / timelineTotal) * 100}%` }} />
+            )}
+          </div>
+          <div className="relative mt-2 h-5 font-mono text-xs text-base-content/60">
+            {[0, 0.25, 0.5, 0.75, 1].map((fraction) => (
+              <span key={fraction} className={`absolute whitespace-nowrap ${fraction === 0 ? "" : fraction === 1 ? "-translate-x-full" : "-translate-x-1/2"}`} style={{ left: `${fraction * 100}%` }}>
+                {formatTime(timelineTotal * fraction)}
+              </span>
+            ))}
+            <span className="sr-only">time units</span>
+          </div>
         </div>
       </div>
     );
@@ -210,13 +309,13 @@ export function CpuSchedulingWorkspace() {
             <div className="space-y-4 p-4">
               <label className="form-control w-full">
                 <span className="label-text ui-label mb-1">Algorithm</span>
-                <select className="select select-bordered select-sm w-full" value={algorithm} onChange={(event) => setAlgorithm(event.target.value as SchedulingAlgorithm)}>
+                <select className="select select-bordered select-sm w-full" value={algorithm} onChange={(event) => { setIsPlaying(false); seekTo(0); setAlgorithm(event.target.value as SchedulingAlgorithm); }}>
                   {algorithmOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
               </label>
               <label className={`form-control w-full ${algorithm !== "ROUND_ROBIN" ? "opacity-60" : ""}`}>
                 <span className="label-text ui-label mb-1">Round Robin time quantum</span>
-                <input className="input input-bordered input-sm w-full" type="number" min="1" step="1" value={timeQuantum} onChange={(event) => setTimeQuantum(event.target.value)} disabled={algorithm !== "ROUND_ROBIN"} />
+                <input className="input input-bordered input-sm w-full" type="number" min="1" step="1" value={timeQuantum} onChange={(event) => { setIsPlaying(false); seekTo(0); setResult(null); setComparison(null); setTimeQuantum(event.target.value); }} disabled={algorithm !== "ROUND_ROBIN"} />
               </label>
               <div className="grid gap-2 sm:grid-cols-2">
                 <button type="button" className="btn btn-primary btn-sm" disabled={isRunning} onClick={runSelected}>
@@ -237,13 +336,13 @@ export function CpuSchedulingWorkspace() {
             {algorithmOptions.map((option) => (
               <button key={option.value} type="button" role="tab" aria-selected={comparisonAlgorithm === option.value}
                 className={`tab whitespace-nowrap ${comparisonAlgorithm === option.value ? "tab-active" : ""}`}
-                onClick={() => setComparisonAlgorithm(option.value)}>{option.value === "PRIORITY" ? "Priority" : option.value.replace("ROUND_ROBIN", "Round Robin")}</button>
+                onClick={() => { setIsPlaying(false); seekTo(0); setComparisonAlgorithm(option.value); }}>{option.value === "PRIORITY" ? "Priority" : option.value.replace("ROUND_ROBIN", "Round Robin")}</button>
             ))}
           </nav>
         )}
 
         {activeResult ? (
-          <section className="space-y-4 rounded-lg border border-base-300 bg-base-100 p-4 sm:p-5" aria-live="polite" aria-labelledby="schedule-result-title">
+          <section className="space-y-4 rounded-lg border border-base-300 bg-base-100 p-4 sm:p-5" aria-labelledby="schedule-result-title">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div><p className="ui-section-label">Schedule result</p><h3 id="schedule-result-title" className="ui-panel-title mt-1">{algorithmOptions.find((option) => option.value === activeResult.algorithm)?.label}</h3></div>
               <span className="rounded-md bg-base-200 px-2 py-1 font-mono text-xs">{activeResult.jobs.length} jobs · {activeResult.timeline.at(-1)?.end_time ?? 0} time units</span>
@@ -257,7 +356,93 @@ export function CpuSchedulingWorkspace() {
             </div>
             {activeResult.algorithm === "PRIORITY" && <p className="ui-meta">{activeResult.priority_convention}</p>}
             {activeResult.algorithm === "ROUND_ROBIN" && <p className="ui-meta">Time quantum: {activeResult.time_quantum} units.</p>}
-            <div><h4 className="ui-section-label mb-2">Gantt timeline</h4>{appendBlankTimeline(activeResult)}<p className="ui-meta">Gray segments indicate idle CPU time.</p></div>
+            <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,7fr)_minmax(280px,3fr)]">
+              <div className="min-w-0 space-y-4">
+                <section className="rounded-lg border border-base-300 bg-base-100 p-3 sm:p-4" aria-label="Interactive scheduling playback">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div><h4 className="ui-section-label">Process lifecycle</h4><p className="ui-meta">Follow each job through admission, dispatch, preemption, and completion.</p></div>
+                    <span className="rounded-md bg-base-200 px-3 py-2 font-mono text-lg font-bold" aria-label="Current simulated time">t = {formatTime(playbackTime)}</span>
+                  </div>
+                  <div className="h-[min(60vh,600px)] min-h-[390px] w-full">
+                    <ProcessStateGraph
+                      processes={[]}
+                      selectedPid={null}
+                      validActions={[]}
+                      pendingAction={null}
+                      playback={{
+                        jobs: activeResult.jobs.map((job) => ({ job_id: job.job_id, name: job.name, state: playbackSnapshot?.states[job.job_id] ?? "NEW" })),
+                        activeAction: playbackSnapshot?.event?.action ?? null,
+                        activeJobId: playbackSnapshot?.event?.job_id ?? null,
+                        runningJobId: playbackSnapshot?.runningJobId ?? null,
+                        animationEvents,
+                        animationResetKey,
+                        isPlaying,
+                        playbackSpeed,
+                        isAtEnd: playbackTime >= totalTime,
+                      }}
+                    />
+                  </div>
+                </section>
+
+                <section className="rounded-lg border border-base-300 bg-base-100 p-3 sm:p-4" aria-label="Scheduling Gantt chart">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div><h4 className="ui-section-label">Gantt timeline</h4><p className="ui-meta">The highlighted interval and playhead use the lifecycle clock.</p></div>
+                    <span className="ui-meta">Gray = CPU idle</span>
+                  </div>
+                  {appendBlankTimeline(activeResult)}
+                </section>
+              </div>
+
+              <aside className="min-w-0 space-y-4 rounded-lg border border-base-300 bg-base-100 p-4 lg:sticky lg:top-4" aria-label="Playback controls and events">
+                <div className="flex items-end justify-between gap-2">
+                  <div><p className="ui-section-label">Playback</p><p className="mt-1 font-mono text-2xl font-bold">{formatTime(playbackTime)}<span className="ml-1 text-sm font-medium text-base-content/60">/ {formatTime(totalTime)}</span></p></div>
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${playbackTime >= totalTime ? "bg-success/15 text-success" : playbackSnapshot?.runningJobId ? "bg-amber-500/15 text-amber-800" : "bg-base-200 text-base-content/70"}`}>
+                    {playbackTime >= totalTime ? "COMPLETE" : playbackSnapshot?.runningJobId ? `RUNNING · ${playbackSnapshot.runningJobId}` : "CPU IDLE"}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" className="btn btn-primary col-span-2" disabled={(!isPlaying && playbackTime >= totalTime) || totalTime <= 0} onClick={() => setIsPlaying((playing) => !playing)}>{isPlaying ? "Pause" : "Play"}</button>
+                  <button type="button" className="btn btn-outline btn-sm" onClick={() => { setIsPlaying(false); seekTo(0, true); }}>Restart</button>
+                  <label className="form-control">
+                    <span className="sr-only">Playback speed</span>
+                    <select aria-label="Playback speed" className="select select-bordered select-sm w-full" value={playbackSpeed} onChange={(event) => setPlaybackSpeed(Number(event.target.value))}>
+                      {[0.5, 1, 2, 4].map((speed) => <option key={speed} value={speed}>{speed}× speed</option>)}
+                    </select>
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" className="btn btn-outline btn-sm" disabled={!eventTimes.some((time) => time < playbackTime)} onClick={() => { setIsPlaying(false); seekTo([...eventTimes].reverse().find((time) => time < playbackTime) ?? 0); }}>← Previous event</button>
+                  <button type="button" className="btn btn-outline btn-sm" disabled={!eventTimes.some((time) => time > playbackTime)} onClick={() => { setIsPlaying(false); seekTo(eventTimes.find((time) => time > playbackTime) ?? totalTime); }}>Next event →</button>
+                </div>
+
+                <label className="block space-y-1">
+                  <span className="sr-only">Seek simulation time</span>
+                  <input aria-label="Seek simulation time" className="range range-primary range-sm w-full" type="range" min="0" max={totalTime || 1} step="0.01" value={playbackTime} onChange={(event) => { setIsPlaying(false); seekTo(Number(event.target.value)); }} />
+                  <span className="flex justify-between font-mono text-xs text-base-content/60"><span>0</span><span>{formatTime(totalTime)} units</span></span>
+                </label>
+
+                <section className="rounded-md border border-primary/30 bg-primary/5 p-3" aria-live="polite" aria-atomic="true">
+                  <p className="ui-section-label">Current event</p>
+                  <p className="mt-1 font-semibold">{playbackSnapshot?.event ? `${playbackSnapshot.event.action} · ${playbackSnapshot.event.from} → ${playbackSnapshot.event.to}` : playbackTime >= totalTime ? "Schedule complete" : playbackSnapshot?.segment?.job_id === null ? "CPU idle" : "Simulation ready"}</p>
+                  <p className="ui-body mt-1">{playbackSnapshot?.explanation}</p>
+                </section>
+
+                <section aria-label="Recent scheduling events">
+                  <h4 className="ui-section-label mb-2">Recent events</h4>
+                  <ol className="space-y-2">
+                    {playbackEvents.filter((event) => event.time <= playbackTime).slice(-6).reverse().map((event, index) => (
+                      <li key={`${event.time}-${event.job_id}-${event.action}-${index}`} className="flex items-start gap-2 border-l-2 border-base-300 pl-2 text-xs">
+                        <span className="shrink-0 font-mono text-base-content/60">{formatTime(event.time)}</span>
+                        <span className="min-w-0"><strong>{event.job_id}</strong><span className="ml-1">{event.from} → {event.to}</span><span className="ml-1 text-base-content/60">{event.action}</span></span>
+                      </li>
+                    ))}
+                    {playbackEvents.every((event) => event.time > playbackTime) && <li className="ui-meta">Events will appear here during playback.</li>}
+                  </ol>
+                </section>
+              </aside>
+            </div>
             <div className="overflow-x-auto">
               <table className="table table-sm table-zebra">
                 <thead><tr><th>Job</th><th>Arrival</th><th>Burst</th><th>First start</th><th>Completion</th><th>Waiting</th><th>Turnaround</th><th>Response</th></tr></thead>

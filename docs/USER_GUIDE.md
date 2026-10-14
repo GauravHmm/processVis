@@ -40,7 +40,7 @@ The area directly under the header has two workspace tabs:
 | Tab | What it contains |
 |-----|------------------|
 | **Process Simulator** | process creation, state machine, PCB inspection, hierarchy, event log |
-| **CPU Scheduling** | job inputs, algorithm selection, Gantt chart, scheduling metrics |
+| **CPU Scheduling** | job inputs, algorithm selection, lifecycle playback, Gantt chart, scheduling metrics |
 
 In the Process Simulator, a second tab row at the bottom switches between
 **Process Table** and **Event Timeline**. The header always shows the backend
@@ -158,6 +158,12 @@ Choose one of:
 - **Priority Scheduling** — non-preemptive
 - **Round Robin**
 
+All choices use deterministic backend tie rules: FCFS selects earliest arrival then request
+order; SJF selects shortest burst, then earliest arrival and request order; Priority selects
+the largest priority number, then earliest arrival and request order. Higher priority values
+(0–100) mean higher priority. Round Robin is FIFO; arrivals during a slice enter the queue
+before the unfinished process is requeued.
+
 ### 4.3 Round Robin time quantum
 
 The **Round Robin time quantum** field is enabled only when Round Robin is
@@ -171,6 +177,9 @@ Click **Run selected**. The result panel shows:
 - algorithm name, job count, and total makespan,
 - **Average waiting**, **Average turnaround**, **Average response**,
 - the **Gantt timeline** (gray segments are idle CPU),
+- the five-state lifecycle diagram with each job's ID, its current state, and an animated
+  token travelling on the transition edge as playback crosses events,
+- playback controls and the current event explanation,
 - a per-job table: Arrival, Burst, First start, Completion, Waiting,
   Turnaround, Response,
 - for Priority runs, the convention: *"Higher numeric values (0-100) mean
@@ -182,16 +191,42 @@ Click **Run selected**. The result panel shows:
 Click **Compare all four**. All four algorithms run on exactly the same job
 list; the value in the quantum field is used for Round Robin. A tab row appears
 so you can switch between FCFS, SJF, Priority, and Round Robin results, each
-with its own timeline and metrics.
+with its own lifecycle playback, timeline, and metrics. Selecting a different result
+restarts playback at time zero.
 
-### 4.6 Reading the Gantt chart
+### 4.6 Controlling lifecycle playback
+
+The lifecycle diagram is the main view; its job labels represent state at the displayed
+simulation time. The separate moving token shows the transition currently being animated.
+The diagram and Gantt playhead use the same clock.
+
+- **Play / Pause** — advance or hold the simulation clock. Resume continues from the held
+  time.
+- **Restart** — return to time zero and reset the diagram and Gantt playhead.
+- **Previous event / Next event** — jump to the previous or next distinct transition time.
+- **Seekbar** — drag to any time, including a fractional time between events. Seeking
+  reconstructs all states directly and does not replay earlier transitions.
+- **Playback speed** — choose 0.5×, 1×, 2×, or 4×.
+
+The panel shows the simulated time and schedule duration, a concise explanation of the
+current event, and up to six recent events. At the beginning and end, step controls and Play
+are disabled when there is no preceding/following event or no remaining schedule.
+
+Scheduling playback models arrivals/admission (`NEW → READY`), dispatch (`READY → RUNNING`),
+Round Robin preemption (`RUNNING → READY`), and completion (`RUNNING → TERMINATED`). An
+unfinished Round Robin slice is preemption; a job finishing exactly at its quantum boundary
+terminates instead. FCFS, SJF, and Priority are non-preemptive. The scheduler has no I/O
+events, so **BLOCKED** and **WAKE** stay visible in the diagram but remain inactive.
+
+### 4.7 Reading the Gantt chart
 
 Each block is one uninterrupted CPU segment: `start–end` is printed on the
 block and the job name inside it. Block width is proportional to duration.
-Gray blocks are idle time (no job had arrived yet). Hover a block to see its
-exact interval and length.
+The playhead and active-segment highlight follow the lifecycle clock. Gray blocks are
+intervals where no job is running (including periods before an arrival or while the ready
+queue is empty). Hover a block to see its exact interval and length.
 
-### 4.7 Reading the metrics
+### 4.8 Reading the metrics
 
 For every job:
 

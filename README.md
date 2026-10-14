@@ -25,6 +25,8 @@ Two interfaces are provided:
 - Event logging of creations, transitions, rejected transitions, and reset
 - Classical CPU scheduling: FCFS, non-preemptive SJF, non-preemptive Priority, Round Robin
 - Scheduling metrics: waiting time, turnaround time, response time, and Gantt timeline
+- Interactive scheduling playback: a replica of the five-state diagram with moving job
+  tokens, synchronized to the Gantt playhead
 
 ## Features
 
@@ -45,7 +47,10 @@ Two interfaces are provided:
 - **Reset** clears all processes, hierarchy, events, and the PID counter
 - **CPU Scheduling workspace** with job input table, single-algorithm run, four-algorithm
   comparison, Gantt timeline, per-job metrics, and averages
-- **147 automated tests** covering the backend logic, hierarchy, scheduling engine, and API
+- **Lifecycle playback** with Play, Pause, Restart, Previous Event, Next Event, arbitrary
+  seeking, four playback speeds, current-event text, and recent scheduling events; moving
+  tokens follow the existing state diagram's SVG edges
+- **Backend test suite** covering process rules, hierarchy, scheduling, and API behavior
 
 ## State Transition Table
 
@@ -152,6 +157,10 @@ process-creation-visualizer/
 
 ## Installation
 
+Prerequisites: Python 3.10 or newer, Node.js 20.9 or newer (required by the installed
+Next.js 16 package), pnpm 12, and a graphical display only if you plan to run the Tkinter
+interface. The audit environment used Python 3.12.3 and Node 24.18.0.
+
 ### Backend (Python + FastAPI)
 
 ```bash
@@ -210,8 +219,10 @@ source venv/bin/activate
 python -m pytest tests/ -v
 ```
 
-All **147** tests are expected to pass. Frontend type checking (with unused-code
-checks) and production build:
+The suite currently contains **147 tests**. In this audit environment, non-API tests pass,
+but synchronous Starlette `TestClient` requests stall before the application handles the
+request. See [docs/TESTING.md](docs/TESTING.md) for the timed trace and working async ASGI
+verification path. Frontend type checking and production build:
 
 ```bash
 cd frontend
@@ -289,6 +300,11 @@ pnpm
 - No IPC, synchronization, shared memory, virtual memory, databases, authentication,
   WebSockets, or persistence — all state is in-memory and lost when the backend stops
 - No frontend automated tests (type checking and production build only)
+- Scheduling playback derives lifecycle events from backend intervals; it has no I/O model,
+  so BLOCKED and WAKE remain visible but inactive. Continuous token motion needs browser
+  verification before a live demonstration.
+- The synchronous `TestClient` suite currently hangs in this environment; the async ASGI
+  smoke path and passing non-API tests are documented in [docs/TESTING.md](docs/TESTING.md).
 
 ## License
 

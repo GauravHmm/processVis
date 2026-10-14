@@ -26,6 +26,13 @@ everything is:
 - **repeatable** — the same inputs always produce the same schedule, so you can
   predict an answer before you run it.
 
+The learning goals are to identify PCB fields, distinguish the five lifecycle
+states, apply only legal transitions, understand parent-child relationships, and
+compare how arrival time, burst length, priority, and a time quantum change a CPU
+schedule. The lifecycle animation makes the state changes observable alongside
+the execution timeline instead of leaving students to infer transitions from a
+static schedule.
+
 Two front ends exist: a **Next.js web interface** (the primary one) and a
 **Tkinter desktop interface**. Both drive the same Python core.
 
@@ -73,15 +80,19 @@ kept UI-independent, so the same `Controller` could later be exposed over HTTP.
 | Transition Controls | right, below the inspector | the six action buttons; enabled only when the backend says the action is legal |
 | Process Table | bottom tab | flat table of all processes; clicking a row selects it |
 | Event Timeline | bottom tab | timestamped log of creations, transitions, rejections, reset |
-| CPU Scheduling workspace | second workspace tab | job table, algorithm choice, time quantum, run/compare buttons, Gantt chart, metrics |
+| CPU Scheduling workspace | second workspace tab | job table, algorithm choice, time quantum, run/compare buttons, animated lifecycle diagram, synchronized Gantt chart and metrics |
 | Backend status badge | header | polls `GET /api/health` every 30 s: *connected* / *disconnected* / *checking* |
 
-The **Dashboard** owns the shared simulation state (process list, events,
+The **Dashboard** owns the shared simulator state (process list, events,
 selection) and hands it to the other components as props. Individual components
 still call the API for their own narrow job — the creation form posts a process,
 the transition controls fetch valid actions and post an action, the scheduling
 workspace posts jobs — and report results back to the Dashboard so everything
 re-renders from one source.
+
+The scheduling workspace has a separate local playback clock and a derived event
+timeline. Scheduler job IDs and reconstructed states are presentation data only;
+they are never inserted into the simulator's PID table or event log.
 
 ## 4. Process states and PCB fields
 
@@ -132,9 +143,10 @@ program counter never advances because there is no instruction interpreter.
 ## 5. How the scheduling algorithms work
 
 Jobs are plain rows: `job_id`, `name`, `arrival_time`, `burst_time`,
-`priority`. The CPU starts idle at time 0. **Ties are always broken by arrival
-time, then by the order the jobs were submitted**, which makes runs
-deterministic.
+`priority`. The CPU starts idle at time 0. Tie-breaking is deterministic: FCFS
+uses arrival then request order; SJF uses burst, arrival, then request order;
+Priority uses descending priority, arrival, then request order; Round Robin
+starts and adds arrivals in arrival/request order.
 
 - **FCFS** — among jobs that have arrived, take the one with the earliest
   arrival time; run it to completion (non-preemptive). If nobody has arrived,
@@ -150,7 +162,13 @@ deterministic.
   job is re-queued, which is the usual textbook ordering.
 
 The Gantt chart is the algorithm's timeline: one block per uninterrupted run,
-plus gray **IDLE** blocks when the CPU had nothing to do.
+plus gray **IDLE** blocks when no job can run. In the web workspace, an animated
+token follows the existing state diagram edge for admission, dispatch, Round
+Robin preemption, or completion while the Gantt playhead advances on the same
+simulation clock. The right-side controls support play/pause, restart, event
+stepping, arbitrary seeking, and 0.5×–4× speed. Seeking reconstructs the state
+at the selected time instead of replaying prior changes. BLOCKED and WAKE remain
+visible diagram concepts but the current scheduler has no I/O events to animate.
 
 ## 6. Waiting, turnaround, and response time
 
@@ -240,8 +258,10 @@ their bursts, what would each algorithm produce?"*
 >
 > The second tab is the CPU scheduling lab. I enter jobs with an arrival time, a
 > burst, and a priority, then run FCFS, SJF, Priority, or Round Robin — or
-> compare all four at once. I get a Gantt chart with idle time, plus waiting,
-> turnaround, and response times per job and averaged.
+> compare all four at once. I can watch the jobs travel through the lifecycle
+> diagram while the Gantt playhead follows the same clock. I can pause, step
+> between event times, seek, and compare waiting, turnaround, and response times
+> for the complete schedule.
 >
 > Importantly, scheduling is completely separate from the simulator: it
 > calculates results from my inputs and never changes a simulated process's
@@ -306,10 +326,13 @@ A: Pydantic models give request validation and OpenAPI documentation for free,
 async routes suit the small in-memory app, and it keeps dependencies minimal.
 
 **Q: How do you know it works?**
-A: `python -m pytest tests/ -v` — 147 tests over PCB creation, PID uniqueness,
-every valid and invalid transition, hierarchy rules, event logging, reset,
-scheduling metrics for all four algorithms, and HTTP behaviour of every
-endpoint.
+A: The repository contains 147 tests over PCB creation, PID uniqueness, every
+valid and invalid transition, hierarchy rules, event logging, reset, scheduling
+metrics for all four algorithms, and HTTP behavior. In the current audit
+environment, 102 non-API tests pass; synchronous API tests hang inside the
+Starlette/AnyIO `TestClient` portal before endpoint handling. An async ASGI smoke
+check passed, but it does not replace the API test suite. See [TESTING.md](TESTING.md)
+for exact commands and results.
 
 **Q: What would you add next?**
 A: Natural extensions: a preemptive SJF/Priority variant, linking PCB priority
