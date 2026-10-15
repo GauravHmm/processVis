@@ -21,6 +21,7 @@ app.add_middleware(
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "https://processvis-production.up.railway.app",
+        "https://observant-freedom-production-ed9e.up.railway.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
